@@ -1,60 +1,51 @@
 // frontend/src/cryptoUtils.js
 
-// Using Curve25519 for ECDH as it's the recommended curve for Signal-like protocols.
-// However, Web Crypto API directly supports P-256, P-384, P-521.
-// For true Curve25519, you might need a library like libsodium.js if direct browser support isn't available.
-// For now, let's use P-256, as it's well-supported and secure.
 const ECDH_ALGO = {
     name: "ECDH",
-    namedCurve: "P-256" // P-256 is the standard elliptic curve for Web Crypto API
+    namedCurve: "P-256"
 };
 
 const AES_ALGO = {
-    name: "AES-GCM", // AES-GCM is recommended for authenticated encryption
-    length: 256       // 256-bit key
+    name: "AES-GCM",
+    length: 256
 };
 
-const HASH_ALGO = "SHA-256"; // For hashing public keys or other data
+const HASH_ALGO = "SHA-256";
 
-/**
- * Generates a new ECDH key pair for a session.
- * @returns {Promise<CryptoKeyPair>}
- */
 export async function generateSessionKeyPair() {
     return await window.crypto.subtle.generateKey(
         ECDH_ALGO,
-        true, // extractable
+        true,
         ["deriveKey", "deriveBits"]
     );
 }
 
-/**
- * Derives a shared symmetric key from two ECDH key pairs (own private, peer's public).
- * This is the core of Diffie-Hellman key exchange.
- * @param {CryptoKey} privateKey Our own private ECDH key.
- * @param {CryptoKey} publicKey Peer's public ECDH key.
- * @returns {Promise<CryptoKey>} Derived symmetric key (AES-GCM).
- */
 export async function deriveSharedSecret(privateKey, publicKey) {
     return await window.crypto.subtle.deriveKey(
         { name: ECDH_ALGO.name, public: publicKey },
         privateKey,
         AES_ALGO,
-        true, // extractable
+        true,
         ["encrypt", "decrypt"]
     );
 }
 
 /**
- * Encrypts a text message using AES-GCM.
+ * Encrypts data (string or ArrayBuffer) using AES-GCM.
  * @param {CryptoKey} key The symmetric AES-GCM key.
- * @param {string} plaintext The message to encrypt.
+ * @param {string | ArrayBuffer} dataToEncrypt The data to encrypt (text or binary).
  * @returns {Promise<{ciphertext: ArrayBuffer, iv: Uint8Array}>}
  */
-export async function encryptMessage(key, plaintext) {
-    const encoded = new TextEncoder().encode(plaintext);
-    // IV (Initialization Vector) must be unique for each encryption with the same key
-    // For AES-GCM, 12 bytes (96 bits) is the standard recommendation.
+export async function encryptMessage(key, dataToEncrypt) {
+    let encoded;
+    if (typeof dataToEncrypt === 'string') {
+        encoded = new TextEncoder().encode(dataToEncrypt);
+    } else if (dataToEncrypt instanceof ArrayBuffer) {
+        encoded = new Uint8Array(dataToEncrypt); // Use Uint8Array view for encryption
+    } else {
+        throw new Error('Data to encrypt must be string or ArrayBuffer.');
+    }
+
     const iv = window.crypto.getRandomValues(new Uint8Array(12));
 
     const ciphertext = await window.crypto.subtle.encrypt(
@@ -71,7 +62,7 @@ export async function encryptMessage(key, plaintext) {
  * @param {CryptoKey} key The symmetric AES-GCM key.
  * @param {ArrayBuffer} ciphertext The encrypted message data.
  * @param {Uint8Array} iv The Initialization Vector used during encryption.
- * @returns {Promise<string>} The decrypted plaintext.
+ * @returns {Promise<ArrayBuffer>} The decrypted data as an ArrayBuffer.
  */
 export async function decryptMessage(key, ciphertext, iv) {
     const decrypted = await window.crypto.subtle.decrypt(
@@ -79,14 +70,9 @@ export async function decryptMessage(key, ciphertext, iv) {
         key,
         ciphertext
     );
-    return new TextDecoder().decode(decrypted);
+    return decrypted; // Will be an ArrayBuffer
 }
 
-/**
- * Exports a public key to a shareable format (JWK - JSON Web Key).
- * @param {CryptoKey} publicKey
- * @returns {Promise<JsonWebKey>}
- */
 export async function exportPublicKey(publicKey) {
     return await window.crypto.subtle.exportKey(
         "jwk",
@@ -94,27 +80,16 @@ export async function exportPublicKey(publicKey) {
     );
 }
 
-/**
- * Imports a public key from a JWK format.
- * @param {JsonWebKey} jwk
- * @returns {Promise<CryptoKey>}
- */
 export async function importPublicKey(jwk) {
     return await window.crypto.subtle.importKey(
         "jwk",
         jwk,
         ECDH_ALGO,
-        true, // extractable
-        [] // Public keys are not used for encrypt/decrypt directly
+        true,
+        []
     );
 }
 
-/**
- * Generates a unique, short code (for QR/alphanumeric code).
- * This is NOT for crypto purposes, but for identity.
- * @param {number} length
- * @returns {string}
- */
 export function generateRandomCode(length = 8) {
     const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
     let result = '';
@@ -125,12 +100,13 @@ export function generateRandomCode(length = 8) {
     return result;
 }
 
-/**
- * Zeros out ArrayBuffer content for ephemeral data.
- * While not guaranteed by the JS engine/GC, it's a best effort.
- * @param {ArrayBuffer} buffer
- */
 export function zeroFill(buffer) {
-    const view = new Uint8Array(buffer);
-    view.fill(0);
+    if (buffer instanceof ArrayBuffer) {
+        const view = new Uint8Array(buffer);
+        view.fill(0);
+    } else if (buffer instanceof Uint8Array) {
+        buffer.fill(0);
+    }
+    // Note: This does not remove the object from memory, just overwrites its content.
+    // JS garbage collection determines when it's fully freed.
 }

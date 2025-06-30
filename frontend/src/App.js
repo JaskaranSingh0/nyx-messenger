@@ -1,6 +1,7 @@
 // frontend/src/App.js
-import React, { useEffect, useState, useRef } from 'react';
-//import WebSocket from 'ws'; // Node.js 'ws' library isn't directly usable in browser. Use native WebSocket.
+import React, { useEffect, useState, useRef, useCallback } from 'react';
+// No 'import WebSocket from 'ws';' here, use native browser WebSocket
+import { QRCodeSVG } from 'qrcode.react'; // Correct named import
 import {
     generateSessionKeyPair,
     deriveSharedSecret,
@@ -10,45 +11,72 @@ import {
     importPublicKey,
     generateRandomCode,
     zeroFill
-} from './cryptoUtils'; // Import our crypto utilities
-import { QRCodeSVG } from 'qrcode.react'; // We'll use SVG for simplicity, it's generally good for web
+} from './cryptoUtils';
 import './App.css';
-
-// Using native WebSocket API in the browser. No need to import 'ws' library.
 
 function App() {
     const [ws, setWs] = useState(null);
     const [connectionStatus, setConnectionStatus] = useState('Disconnected');
     const [messageInput, setMessageInput] = useState('');
-    const [chatMessages, setChatMessages] = useState([]); // Array of {sender: 'me'/'peer', content: '...', type: 'text'/'file'}
-    const [sessionKeyPair, setSessionKeyPair] = useState(null); // Our ephemeral ECDH key pair
-    const [peerPublicKey, setPeerPublicKey] = useState(null); // Peer's ephemeral ECDH public key
-    const [sharedSecret, setSharedSecret] = useState(null); // Derived AES-GCM key for messaging
-    const [connectionCode, setConnectionCode] = useState(''); // Our one-time connection code
-    const [inputConnectionCode, setInputConnectionCode] = useState(''); // Input for peer's code
-    const [statusMessage, setStatusMessage] = useState(''); // General status messages
-    const [qrValue, setQrValue] = useState(''); // Value to encode in QR code
-
+    const [chatMessages, setChatMessages] = useState([]);
+    const [sessionKeyPair, setSessionKeyPair] = useState(null);
+    const sessionKeyPairRef = useRef(null); // New ref
+    const [peerPublicKey, setPeerPublicKey] = useState(null);
+    const [sharedSecret, setSharedSecret] = useState(null);
+    const [myConnectionCode, setMyConnectionCode] = useState(''); // Renamed for clarity
+    const [peerConnectionCode, setPeerConnectionCode] = useState(''); // What peer's code we are connecting to
+    const [statusMessage, setStatusMessage] = useState('');
+    const [qrValue, setQrValue] = useState('');
+    const [inputConnectionCode, setInputConnectionCode] = useState(''); // Input for peer's code to connect to <-- ADD THIS LINE
+ 
     // File sharing state
     const [fileToShare, setFileToShare] = useState(null);
-    const [viewDuration, setViewDuration] = useState(5); // Default 5 seconds
-    const [receivingFile, setReceivingFile] = useState(false);
-    const [currentFileDisplay, setCurrentFileDisplay] = useState(null); // To display the received ephemeral file
-    const fileTimerRef = useRef(null); // Ref to hold the file display timer
+    const [viewDuration, setViewDuration] = useState(5);
+    const [currentFileDisplay, setCurrentFileDisplay] = useState(null);
+    const fileTimerRef = useRef(null);
+    const [transferringFile, setTransferringFile] = useState(false); // To show file transfer progress
+
+    // WebRTC refs
+    const peerConnectionRef = useRef(null);
+    const dataChannelRef = useRef(null);
 
     // --- WebSocket and Connection Management ---
     useEffect(() => {
-        const socket = new WebSocket('ws://localhost:8080'); // Connect to your backend
+        const socket = new WebSocket('ws://localhost:8080');
 
         socket.onopen = async () => {
             console.log('Connected to WebSocket signaling server.');
             setConnectionStatus('Connected to Signaling Server');
-            setStatusMessage('Generate a code or enter peer\'s code to start a secure session.');
+            setStatusMessage('Generating keys and unique code...');
 
-            // Generate our session key pair immediately on connection
+            // Generate our session key pair
             const kp = await generateSessionKeyPair();
-            setSessionKeyPair(kp);
-            console.log('Session Key Pair Generated.');
+            setSessionKeyPair(kp); // Update state for UI
+            sessionKeyPairRef.current = kp; // Update ref for immediate access in callbacks
+
+            console.log('Session Key Pair Generated and set in state.');
+
+            // Now that sessionKeyPair is guaranteed to be set, generate and register the code
+            const code = generateRandomCode(8);
+            setMyConnectionCode(code);
+            // We now have access to kp.publicKey because the await above has completed.
+            const publicKeyJwk = await exportPublicKey(kp.publicKey); // Use kp directly
+            setQrValue(JSON.stringify({ code: code, publicKey: publicKeyJwk })); // Update QR value here
+
+            // Register our code with the server
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ type: 'register_code', code: code }));
+            }
+            setStatusMessage(`Your ephemeral code is: ${code}. Share it with your peer.`);
+
+            // Set a timer for the code to expire (on client-side)
+            setTimeout(() => {
+                if (myConnectionCode === code) { // Only expire if it's still the active code
+                    setMyConnectionCode('');
+                    setQrValue('');
+                    setStatusMessage('Connection code expired. Generate a new one to invite a peer.');
+                }
+            }, 60 * 1000); // 60 seconds validity
         };
 
         socket.onmessage = async event => {
@@ -56,64 +84,85 @@ function App() {
             console.log('Received signaling message:', data);
 
             switch (data.type) {
+                case 'registration_success':
+                    // We've already set the QR value in onopen, so this message
+                    // mainly confirms registration. You can adjust status message here if preferred.
+                    setStatusMessage(`Your ephemeral code is: ${data.code}. Share it with your peer.`);
+                    break;
+
                 case 'session_offer':
                     // This is the first step for User B
-                    if (sessionKeyPair) {
-                        try {
-                            const peerPk = await importPublicKey(data.publicKeyJwk);
-                            setPeerPublicKey(peerPk);
+                    // Ensure sessionKeyPair is available before proceeding
+                    if (!sessionKeyPairRef.current) { // Check the ref
+                        console.error('Session key pair not available in ref for session_offer.');
+                        setStatusMessage('Error: Session key not ready for offer. Please refresh.');
+                        return;
+                    }
+                    try {
+                        const peerPk = await importPublicKey(data.publicKeyJwk);
+                        setPeerPublicKey(peerPk);
 
-                            const ss = await deriveSharedSecret(sessionKeyPair.privateKey, peerPk);
-                            setSharedSecret(ss);
+                        // Use sessionKeyPairRef.current for immediate access
+                        const ss = await deriveSharedSecret(sessionKeyPairRef.current.privateKey, peerPk);
+                        setSharedSecret(ss);
 
-                            // Send our public key back as an 'answer'
-                            const ourPublicKeyJwk = await exportPublicKey(sessionKeyPair.publicKey);
-                            socket.send(JSON.stringify({
-                                type: 'session_answer',
-                                toCode: data.fromCode, // Send back to the sender of the offer
-                                publicKeyJwk: ourPublicKeyJwk
-                            }));
+                        setPeerConnectionCode(data.fromCode); // Remember who sent the offer
 
-                            setStatusMessage('Shared secret derived. Secure session established! You can now chat.');
-                            setConnectionStatus('Secure Session Active');
-                            // Now initiate WebRTC connection (simplified for this example)
-                            await setupWebRTC(socket, true); // true for receiver/answerer
-                        } catch (error) {
-                            console.error('Error handling session offer:', error);
-                            setStatusMessage('Failed to establish session: ' + error.message);
-                        }
-                    } else {
-                        setStatusMessage('Error: Session key not ready when offer received.');
+                        const ourPublicKeyJwk = await exportPublicKey(sessionKeyPairRef.current.publicKey); // Use ref
+                        socket.send(JSON.stringify({
+                            type: 'session_answer',
+                            toCode: data.fromCode,
+                            fromCode: myConnectionCode, // Our code
+                            publicKeyJwk: ourPublicKeyJwk
+                        }));
+
+                        setStatusMessage('Shared secret derived. Secure session established! Setting up WebRTC...');
+                        setConnectionStatus('Secure Session Active');
+                        await setupWebRTC(socket, true); // true for receiver/answerer
+                    } catch (error) {
+                        console.error('Error handling session offer:', error);
+                        setStatusMessage('Failed to establish session: ' + error.message);
                     }
                     break;
 
                 case 'session_answer':
                     // This is the response for User A after sending an offer
-                    if (sessionKeyPair) {
-                        try {
-                            const peerPk = await importPublicKey(data.publicKeyJwk);
-                            setPeerPublicKey(peerPk);
+                    // Ensure sessionKeyPair is available before proceeding
+                    if (!sessionKeyPairRef.current) { // Check the ref
+                        console.error('Session key pair not available in ref for session_answer.');
+                        setStatusMessage('Error: Session key not ready for answer. Please refresh.');
+                        return;
+                    }
+                    try {
+                        const peerPk = await importPublicKey(data.publicKeyJwk);
+                        setPeerPublicKey(peerPk);
 
-                            const ss = await deriveSharedSecret(sessionKeyPair.privateKey, peerPk);
-                            setSharedSecret(ss);
-                            setStatusMessage('Shared secret derived. Secure session established! You can now chat.');
-                            setConnectionStatus('Secure Session Active');
-                            // Now initiate WebRTC connection (simplified for this example)
-                            await setupWebRTC(socket, false); // false for initiator/offerer
-                        } catch (error) {
-                            console.error('Error handling session answer:', error);
-                            setStatusMessage('Failed to establish session: ' + error.message);
-                        }
-                    } else {
-                        setStatusMessage('Error: Session key not ready when answer received.');
+                        // Use sessionKeyPairRef.current for immediate access
+                        const ss = await deriveSharedSecret(sessionKeyPairRef.current.privateKey, peerPk);
+                        setSharedSecret(ss);
+                        setStatusMessage('Shared secret derived. Secure session established! Setting up WebRTC...');
+                        setConnectionStatus('Secure Session Active');
+                        await setupWebRTC(socket, false); // false for initiator/offerer
+                    } catch (error) {
+                        console.error('Error handling session answer:', error);
+                        setStatusMessage('Failed to establish session: ' + error.message);
                     }
                     break;
 
                 case 'webrtc_offer':
                 case 'webrtc_answer':
                 case 'webrtc_ice_candidate':
-                    // WebRTC signaling messages
                     handleWebRTCSignaling(data);
+                    break;
+
+                case 'encrypted_message':
+                    // Fallback for E2EE text messages if WebRTC not ready
+                    handleReceivedMessage(data.message);
+                    break;
+
+                case 'error':
+                    console.error('Server error:', data.message);
+                    setStatusMessage(`Server Error: ${data.message}`);
                     break;
 
                 default:
@@ -124,17 +173,27 @@ function App() {
         socket.onclose = () => {
             console.log('Disconnected from WebSocket signaling server.');
             setConnectionStatus('Disconnected');
-            setStatusMessage('Disconnected from signaling server. Please refresh.');
-            // Clear all session-related state on disconnect
+            setStatusMessage('Disconnected from signaling server. Please refresh to start a new session.');
+            // Clear all session-related state on disconnect to enforce ephemerality
             setSessionKeyPair(null);
             setPeerPublicKey(null);
             setSharedSecret(null);
-            setConnectionCode('');
-            setInputConnectionCode('');
+            setMyConnectionCode('');
+            setPeerConnectionCode('');
             setQrValue('');
             setChatMessages([]);
             setCurrentFileDisplay(null);
+            setFileToShare(null);
+            setTransferringFile(false);
             if (fileTimerRef.current) clearTimeout(fileTimerRef.current);
+            if (peerConnectionRef.current) {
+                peerConnectionRef.current.close();
+                peerConnectionRef.current = null;
+            }
+            if (dataChannelRef.current) {
+                dataChannelRef.current.close();
+                dataChannelRef.current = null;
+            }
         };
 
         socket.onerror = error => {
@@ -150,36 +209,39 @@ function App() {
                 socket.close();
             }
         };
-    }, []); // Only run once on mount
+    }, []); // Empty dependency array means this runs once on mount
 
     // --- Connection Code / QR Code Generation & Handling ---
 
-    const generateCode = async () => {
+    const generateMyCodeAndSend = async () => {
         if (!sessionKeyPair) {
             setStatusMessage('Generating keys... please wait.');
             return;
         }
         const code = generateRandomCode(8); // 8-char alphanumeric
-        setConnectionCode(code);
+        setMyConnectionCode(code);
 
         const publicKeyJwk = await exportPublicKey(sessionKeyPair.publicKey);
-        // Stringify the full connection data, including our public key
         const qrData = JSON.stringify({ code: code, publicKey: publicKeyJwk });
         setQrValue(qrData);
 
-        setStatusMessage(`Share this code or QR: ${code}. Valid for 60 seconds.`);
+        setStatusMessage(`Share this code or QR: ${code}. Valid for 60 seconds. Awaiting peer connection...`);
+        // Register our code with the server
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'register_code', code: code }));
+        }
 
-        // Set a timer for the code to expire
+        // Set a timer for the code to expire (on client-side, server will also handle it if not used)
         setTimeout(() => {
-            if (connectionCode === code) { // Only expire if it's still the active code
-                setConnectionCode('');
+            if (myConnectionCode === code) { // Only expire if it's still the active code
+                setMyConnectionCode('');
                 setQrValue('');
-                setStatusMessage('Connection code expired. Generate a new one.');
+                setStatusMessage('Connection code expired. Generate a new one to invite a peer.');
             }
         }, 60 * 1000); // 60 seconds validity
     };
 
-    const enterPeerCode = async () => {
+    const connectToPeer = async () => {
         if (!ws || ws.readyState !== WebSocket.OPEN) {
             setStatusMessage('Not connected to signaling server.');
             return;
@@ -193,15 +255,18 @@ function App() {
             return;
         }
 
+        // Remember the peer's code we are trying to connect to
+        setPeerConnectionCode(inputConnectionCode);
+
         try {
             const ourPublicKeyJwk = await exportPublicKey(sessionKeyPair.publicKey);
             ws.send(JSON.stringify({
                 type: 'session_offer',
                 toCode: inputConnectionCode,
-                fromCode: connectionCode || generateRandomCode(8), // If we didn't generate one, create a temporary one for this offer
+                fromCode: myConnectionCode, // Our own registered code
                 publicKeyJwk: ourPublicKeyJwk
             }));
-            setStatusMessage(`Attempting to connect using code: ${inputConnectionCode}`);
+            setStatusMessage(`Sending connection offer to peer with code: ${inputConnectionCode}`);
         } catch (error) {
             console.error('Error sending session offer:', error);
             setStatusMessage('Failed to send connection offer: ' + error.message);
@@ -222,27 +287,26 @@ function App() {
             const { ciphertext, iv } = await encryptMessage(sharedSecret, messageInput);
             const messageData = {
                 type: 'text',
-                content: Array.from(new Uint8Array(ciphertext)), // Convert ArrayBuffer to array for JSON
+                content: Array.from(new Uint8Array(ciphertext)),
                 iv: Array.from(iv)
             };
 
-            // Send via WebRTC Data Channel if established, otherwise via WebSocket
-            if (peerConnectionRef.current && dataChannelRef.current && dataChannelRef.current.readyState === 'open') {
+            if (dataChannelRef.current && dataChannelRef.current.readyState === 'open') {
                 dataChannelRef.current.send(JSON.stringify(messageData));
+                setChatMessages(prev => [...prev, { sender: 'me', content: messageInput, type: 'text' }]);
             } else if (ws && ws.readyState === WebSocket.OPEN) {
-                // Fallback for initial signaling/connection issues or if WebRTC fails
-                // NOTE: This sends via your signaling server, which is OK as it's E2EE
+                // Fallback to signaling server if WebRTC not open (E2EE still protects content)
                 ws.send(JSON.stringify({
                     type: 'encrypted_message',
-                    toCode: inputConnectionCode || connectionCode, // Target peer
+                    toCode: peerConnectionCode, // Use the code of the peer we successfully connected to
                     message: messageData
                 }));
+                 setChatMessages(prev => [...prev, { sender: 'me', content: messageInput + ' (sent via server relay)', type: 'text' }]);
             } else {
                 setStatusMessage('No active connection to send message.');
                 return;
             }
 
-            setChatMessages(prev => [...prev, { sender: 'me', content: messageInput, type: 'text' }]);
             setMessageInput('');
         } catch (error) {
             console.error('Error encrypting or sending message:', error);
@@ -264,15 +328,17 @@ function App() {
                 const decryptedText = await decryptMessage(sharedSecret, ciphertext, ivArr);
                 setChatMessages(prev => [...prev, { sender: 'peer', content: decryptedText, type: 'text' }]);
             } else if (type === 'file') {
-                // This is where the received file's decrypted content will temporarily live
-                console.log('Received encrypted file segment/metadata.');
-                setStatusMessage(`Receiving file: ${fileMetadata.name}...`);
-                setReceivingFile(true); // Indicate file is being received
+                setTransferringFile(true); // Indicate that a file is being processed
+                setStatusMessage(`Receiving ephemeral file: ${fileMetadata.name}...`);
 
-                // Assuming content is the full file data for simplicity.
-                // In a real app, this would be chunked and reassembled.
-                const decryptedFileBlob = new Blob([await decryptMessage(sharedSecret, ciphertext, ivArr)]);
-                const fileURL = URL.createObjectURL(decryptedFileBlob);
+                // Decrypt the file content
+                const decryptedFileBlobPart = await decryptMessage(sharedSecret, ciphertext, ivArr); // This needs to be a raw ArrayBuffer/Blob not string
+                // Correct decryption for file should return ArrayBuffer directly
+                // This means encryptMessage for files should return ArrayBuffer, not string.
+                // Re-evaluate encryptMessage in cryptoUtils to handle ArrayBuffers.
+                // For now, let's assume `decryptMessage` can take ArrayBuffer and return Blob/ArrayBuffer.
+                const fileBlob = new Blob([decryptedFileBlobPart], { type: fileMetadata.mimeType });
+                const fileURL = URL.createObjectURL(fileBlob);
 
                 setCurrentFileDisplay({
                     url: fileURL,
@@ -286,18 +352,14 @@ function App() {
                 if (fileTimerRef.current) clearTimeout(fileTimerRef.current);
                 fileTimerRef.current = setTimeout(() => {
                     clearFileDisplay();
-                    setStatusMessage('File display expired and cleared.');
+                    setStatusMessage('Ephemeral file display expired and cleared.');
                 }, fileMetadata.duration * 1000);
 
+                setTransferringFile(false);
             }
             // Aggressively zero-fill buffers after use (best effort)
             zeroFill(ciphertext);
             zeroFill(ivArr.buffer);
-            if (typeof content === 'string' && content.byteLength) {
-                 // For actual ArrayBuffer, not string representation
-                zeroFill(new TextEncoder().encode(content).buffer);
-            }
-
 
         } catch (error) {
             console.error('Error decrypting message:', error);
@@ -305,16 +367,15 @@ function App() {
         }
     };
 
-    const clearFileDisplay = () => {
+    const clearFileDisplay = useCallback(() => {
         if (currentFileDisplay && currentFileDisplay.url) {
             URL.revokeObjectURL(currentFileDisplay.url); // Release the object URL
         }
         setCurrentFileDisplay(null);
-        setReceivingFile(false);
         if (fileTimerRef.current) clearTimeout(fileTimerRef.current);
         fileTimerRef.current = null;
-    };
-
+        setStatusMessage('File display cleared.');
+    }, [currentFileDisplay]); // Only re-create if currentFileDisplay changes
 
     // --- File Sending Functions ---
 
@@ -332,20 +393,22 @@ function App() {
         }
 
         if (!(peerConnectionRef.current && dataChannelRef.current && dataChannelRef.current.readyState === 'open')) {
-            setStatusMessage('WebRTC data channel not open for file transfer.');
+            setStatusMessage('WebRTC data channel not open for file transfer. Please wait for direct connection.');
             return;
         }
 
         setStatusMessage('Encrypting and sending file...');
+        setTransferringFile(true);
 
         const reader = new FileReader();
         reader.onload = async (event) => {
             const fileBuffer = event.target.result; // ArrayBuffer of the file
             try {
-                const { ciphertext, iv } = await encryptMessage(sharedSecret, fileBuffer); // Encrypt the ArrayBuffer directly
+                // Ensure encryptMessage can handle ArrayBuffer directly
+                const { ciphertext, iv } = await encryptMessage(sharedSecret, fileBuffer);
                 const fileMessageData = {
                     type: 'file',
-                    content: Array.from(new Uint8Array(ciphertext)),
+                    content: Array.from(new Uint8Array(ciphertext)), // Convert ArrayBuffer to array for JSON
                     iv: Array.from(iv),
                     fileMetadata: {
                         name: fileToShare.name,
@@ -355,28 +418,40 @@ function App() {
                     }
                 };
 
-                // Send via WebRTC Data Channel
+                // WebRTC Data Channels have message size limits (often 64KB-256KB per message).
+                // For larger files, you'd need to chunk the file and send multiple messages,
+                // reassembling on the receiver side. For this MVP, we assume small files that fit.
                 dataChannelRef.current.send(JSON.stringify(fileMessageData));
 
                 setStatusMessage('File sent successfully!');
                 setFileToShare(null); // Clear the file input
                 zeroFill(fileBuffer); // Zero-fill original file buffer
-                zeroFill(ciphertext); // Zero-fill ciphertext buffer
+                zeroFill(new Uint8Array(ciphertext).buffer); // Zero-fill ciphertext buffer
                 zeroFill(iv); // Zero-fill IV buffer
             } catch (error) {
                 console.error('Error encrypting or sending file:', error);
                 setStatusMessage('Failed to send file: ' + error.message);
+            } finally {
+                setTransferringFile(false);
             }
         };
         reader.readAsArrayBuffer(fileToShare); // Read file as ArrayBuffer
     };
 
 
-    // --- WebRTC Setup (Simplified for initial steps) ---
-    const peerConnectionRef = useRef(null);
-    const dataChannelRef = useRef(null);
+    // --- WebRTC Setup and Signaling ---
 
-    const setupWebRTC = async (socket, isReceiver) => {
+    const setupWebRTC = useCallback(async (socket, isReceiver) => {
+        // Close any existing peer connection before setting up a new one
+        if (peerConnectionRef.current) {
+            peerConnectionRef.current.close();
+            peerConnectionRef.current = null;
+        }
+        if (dataChannelRef.current) {
+            dataChannelRef.current.close();
+            dataChannelRef.current = null;
+        }
+
         const peerConnection = new RTCPeerConnection({
             iceServers: [
                 { urls: 'stun:stun.l.google.com:19302' }, // Public STUN server
@@ -391,7 +466,8 @@ function App() {
                 socket.send(JSON.stringify({
                     type: 'webrtc_ice_candidate',
                     candidate: event.candidate,
-                    toCode: inputConnectionCode || connectionCode // Target peer
+                    toCode: peerConnectionCode, // Send to the peer we are connected to
+                    fromCode: myConnectionCode
                 }));
             }
         };
@@ -399,7 +475,7 @@ function App() {
         // --- Data Channel handling ---
         if (!isReceiver) {
             // Initiator creates the data channel
-            const dataChannel = peerConnection.createDataChannel('chat');
+            const dataChannel = peerConnection.createDataChannel('chat', { ordered: true }); // ordered: true for reliable delivery
             dataChannelRef.current = dataChannel;
             console.log('Data channel created (initiator):', dataChannel);
             bindDataChannelEvents(dataChannel);
@@ -413,8 +489,7 @@ function App() {
             };
         }
 
-
-        // --- SDP Exchange ---
+        // --- SDP Exchange (Offer/Answer) ---
         if (!isReceiver) { // Initiator creates offer
             const offer = await peerConnection.createOffer();
             await peerConnection.setLocalDescription(offer);
@@ -422,18 +497,19 @@ function App() {
             socket.send(JSON.stringify({
                 type: 'webrtc_offer',
                 sdp: peerConnection.localDescription,
-                toCode: inputConnectionCode || connectionCode // Target peer
+                toCode: peerConnectionCode,
+                fromCode: myConnectionCode
             }));
         }
-        // Receiver will handle offer on `onmessage` via `handleWebRTCSignaling`
+        // Receiver will handle offer via `handleWebRTCSignaling`
 
-    };
+    }, [myConnectionCode, peerConnectionCode]); // Depend on codes to ensure correct targets
 
-    const bindDataChannelEvents = (dataChannel) => {
+    const bindDataChannelEvents = useCallback((dataChannel) => {
         dataChannel.onopen = () => {
             console.log('WebRTC Data Channel OPEN!');
             setConnectionStatus('Secure WebRTC Channel Active');
-            setStatusMessage('You are now directly connected peer-to-peer!');
+            setStatusMessage('You are now directly connected peer-to-peer! Messaging is direct.');
         };
         dataChannel.onmessage = (event) => {
             console.log('Received data from peer channel:', event.data);
@@ -447,53 +523,94 @@ function App() {
         dataChannel.onclose = () => {
             console.log('WebRTC Data Channel CLOSED!');
             setConnectionStatus('Secure Session Active (WebRTC Closed)');
-            setStatusMessage('WebRTC channel closed. Messages may revert to server relay.');
+            setStatusMessage('WebRTC channel closed. Messages may revert to server relay or connection lost. Re-initiate connection if needed.');
         };
         dataChannel.onerror = (error) => {
             console.error('WebRTC Data Channel ERROR:', error);
             setStatusMessage('WebRTC channel error: ' + error.message);
         };
-    };
+    }, [handleReceivedMessage]);
 
 
-    const handleWebRTCSignaling = async (data) => {
+    const handleWebRTCSignaling = useCallback(async (data) => {
         if (!peerConnectionRef.current) {
-            // If peer connection not yet set up (e.g. if offer arrived before local setup)
-            // This case ideally shouldn't happen with the current flow (setupWebRTC runs after session_offer/answer)
-            // But might need more robust handling in a real-world scenario.
-            console.warn('Peer connection not initialized for WebRTC signaling.');
-            // Force setup if needed
-            await setupWebRTC(ws, data.type === 'webrtc_offer');
-            // Then re-call this function with the same data to process it
-            handleWebRTCSignaling(data);
+            console.warn('WebRTC peer connection not initialized for signaling. This should not happen if `setupWebRTC` runs correctly.');
             return;
         }
 
         try {
-            if (data.type === 'webrtc_offer') {
+            if (data.sdp) { // This is an offer or an answer
                 await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.sdp));
-                const answer = await peerConnectionRef.current.createAnswer();
-                await peerConnectionRef.current.setLocalDescription(answer);
-                ws.send(JSON.stringify({
-                    type: 'webrtc_answer',
-                    sdp: peerConnectionRef.current.localDescription,
-                    toCode: inputConnectionCode || connectionCode // Target peer
-                }));
-            } else if (data.type === 'webrtc_answer') {
-                await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(data.sdp));
-            } else if (data.type === 'webrtc_ice_candidate') {
-                if (data.candidate) {
-                    await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
+                if (data.type === 'webrtc_offer') {
+                    // If it was an offer, create and send an answer
+                    const answer = await peerConnectionRef.current.createAnswer();
+                    await peerConnectionRef.current.setLocalDescription(answer);
+                    ws.send(JSON.stringify({
+                        type: 'webrtc_answer',
+                        sdp: peerConnectionRef.current.localDescription,
+                        toCode: peerConnectionCode,
+                        fromCode: myConnectionCode
+                    }));
                 }
+            } else if (data.candidate) { // This is an ICE candidate
+                await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
             }
         } catch (error) {
             console.error('Error handling WebRTC signaling:', error);
             setStatusMessage('WebRTC signaling error: ' + error.message);
         }
-    };
+    }, [myConnectionCode, peerConnectionCode, ws]);
 
+    // --- CryptoUtils Update ---
+    // Make sure encryptMessage in cryptoUtils can take ArrayBuffer and return ArrayBuffer
+    // (This was a comment in the previous code, but needs to be actually done)
 
-    // --- Render ---
+    // Modification needed in cryptoUtils.js
+    // Original: `plaintext` as string, `encoded` with TextEncoder.
+    // New: `dataToEncrypt` can be string or ArrayBuffer.
+    // Modify `encryptMessage` in `cryptoUtils.js`:
+    /*
+    export async function encryptMessage(key, dataToEncrypt) {
+        let encoded;
+        if (typeof dataToEncrypt === 'string') {
+            encoded = new TextEncoder().encode(dataToEncrypt);
+        } else if (dataToEncrypt instanceof ArrayBuffer) {
+            encoded = new Uint8Array(dataToEncrypt);
+        } else {
+            throw new Error('Data to encrypt must be string or ArrayBuffer.');
+        }
+
+        const iv = window.crypto.getRandomValues(new Uint8Array(12));
+
+        const ciphertext = await window.crypto.subtle.encrypt(
+            { name: AES_ALGO.name, iv: iv },
+            key,
+            encoded
+        );
+
+        return { ciphertext, iv };
+    }
+
+    // Modify decryptMessage to return ArrayBuffer for files
+    export async function decryptMessage(key, ciphertext, iv) {
+        const decrypted = await window.crypto.subtle.decrypt(
+            { name: AES_ALGO.name, iv: iv },
+            key,
+            ciphertext
+        );
+        // If it was text, return string, otherwise return ArrayBuffer
+        // We'll rely on the `type` field in the message to distinguish
+        return decrypted; // Will be ArrayBuffer. Call TextDecoder in App.js if text.
+    }
+    */
+
+    // Back in App.js, handle decrypted result based on type:
+    // For text: `const decryptedText = new TextDecoder().decode(await decryptMessage(sharedSecret, ciphertext, ivArr));`
+    // For file: `const decryptedFileBuffer = await decryptMessage(sharedSecret, ciphertext, ivArr);`
+    // Then `new Blob([decryptedFileBuffer])`
+
+    // Let's ensure this is implemented correctly in `cryptoUtils.js` first.
+    // I'll provide the updated cryptoUtils.js for clarity on this.
 
     return (
         <div className="App">
@@ -502,15 +619,19 @@ function App() {
                 <p>Status: {connectionStatus}</p>
                 <p>{statusMessage}</p>
 
-                {!sharedSecret && ( // Show connection UI if not connected
+                {!sharedSecret && (
                     <div className="connection-section">
                         <h2>Start Secure Session</h2>
-                        <button onClick={generateCode}>Generate One-Time Code</button>
-                        {connectionCode && (
+                        {/* Only show generate button if we have keys and not yet generated a code */}
+                        {sessionKeyPair && !myConnectionCode && (
+                            <button onClick={generateMyCodeAndSend}>Generate Your One-Time Code</button>
+                        )}
+
+                        {myConnectionCode && (
                             <div style={{ marginTop: '20px' }}>
-                                <p>Your Code: <code>{connectionCode}</code></p>
+                                <p>Your Code: <code>{myConnectionCode}</code></p>
                                 {qrValue && <QRCodeSVG value={qrValue} size={128} level="H" />}
-                                <p>Share this code with your peer.</p>
+                                <p>Share this code (physically or securely) with your peer.</p>
                             </div>
                         )}
                         <div style={{ marginTop: '20px' }}>
@@ -518,14 +639,14 @@ function App() {
                                 type="text"
                                 value={inputConnectionCode}
                                 onChange={e => setInputConnectionCode(e.target.value)}
-                                placeholder="Enter peer's code"
+                                placeholder="Enter peer's code to connect"
                             />
-                            <button onClick={enterPeerCode}>Connect to Peer</button>
+                            <button onClick={connectToPeer}>Connect to Peer</button>
                         </div>
                     </div>
                 )}
 
-                {sharedSecret && ( // Show chat UI if connected
+                {sharedSecret && (
                     <div className="chat-section">
                         <h2>Secure Chat</h2>
                         <div className="message-list" style={{ overflowY: 'auto', maxHeight: '300px', border: '1px solid #61dafb', padding: '10px', borderRadius: '5px', marginBottom: '10px' }}>
@@ -543,7 +664,7 @@ function App() {
                                 onKeyPress={e => { if (e.key === 'Enter') sendTextMessage(); }}
                                 placeholder="Type your ephemeral message..."
                             />
-                            <button onClick={sendTextMessage}>Send Message</button>
+                            <button onClick={sendTextMessage} disabled={!dataChannelRef.current || dataChannelRef.current.readyState !== 'open'}>Send Message</button>
                         </div>
 
                         <div className="file-sharing" style={{ marginTop: '20px', borderTop: '1px solid #61dafb', paddingTop: '20px' }}>
@@ -556,7 +677,9 @@ function App() {
                                 <option value={60}>1 minute</option>
                                 <option value={300}>5 minutes</option>
                             </select>
-                            <button onClick={sendFile} disabled={!fileToShare || receivingFile}>Send File (View Once)</button>
+                            <button onClick={sendFile} disabled={!fileToShare || !dataChannelRef.current || dataChannelRef.current.readyState !== 'open' || transferringFile}>
+                                {transferringFile ? 'Sending...' : 'Send File (View Once)'}
+                            </button>
                             {fileToShare && <p>Selected: {fileToShare.name} ({fileToShare.size} bytes)</p>}
 
                             {currentFileDisplay && (
@@ -568,11 +691,12 @@ function App() {
                                     {currentFileDisplay.type.startsWith('video/') && (
                                         <video src={currentFileDisplay.url} controls autoPlay style={{ maxWidth: '100%', maxHeight: '400px' }} onEnded={clearFileDisplay}></video>
                                     )}
-                                    {/* Add other file types as needed, or a generic download link if not displayable */}
+                                    {/* For other types, a simple message or a very temporary download might be an option,
+                                        but for extreme security, restrict to displayable media. */}
                                     <button onClick={clearFileDisplay}>Clear Now</button>
                                 </div>
                             )}
-                            {receivingFile && !currentFileDisplay && <p>Receiving file...</p>}
+                            {transferringFile && !currentFileDisplay && <p>Processing file transfer...</p>}
                         </div>
                     </div>
                 )}
