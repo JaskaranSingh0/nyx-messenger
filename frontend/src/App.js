@@ -15,6 +15,7 @@ import './App.css';
 
 function App() {
     const [ws, setWs] = useState(null);
+    const wsRef = useRef(null);
     const [connectionStatus, setConnectionStatus] = useState('Disconnected');
     const [messageInput, setMessageInput] = useState('');
     const [chatMessages, setChatMessages] = useState([]);
@@ -180,6 +181,8 @@ function App() {
 
     // Callback for setting up WebRTC connection
     const setupWebRTC = useCallback(async (socket, isReceiver, myCode, targetPeerCode) => {
+        console.log("🧠 setupWebRTC called", { isReceiver, myCode, targetPeerCode });
+        
         // Close any existing peer connection before setting up a new one
         if (peerConnectionRef.current) {
             peerConnectionRef.current.close();
@@ -243,6 +246,21 @@ function App() {
         }
     }, [bindDataChannelEvents]); // bindDataChannelEvents is a dependency here
 
+    // Handle page unload for debugging
+    useEffect(() => {
+        const handleBeforeUnload = (e) => {
+            console.log("🔥 Page is reloading or closing!");
+            e.preventDefault();
+            e.returnValue = '';
+        };
+        
+        window.addEventListener("beforeunload", handleBeforeUnload);
+        
+        return () => {
+            window.removeEventListener("beforeunload", handleBeforeUnload);
+        };
+    }, []);
+
     // --- WebSocket and Connection Management ---
     useEffect(() => {
         const socket = new WebSocket('ws://localhost:8080');
@@ -265,7 +283,9 @@ function App() {
             myConnectionCodeRef.current = code; // Update ref for current code
             // We now have access to kp.publicKey because the await above has completed.
             const publicKeyJwk = await exportPublicKey(kp.publicKey); // Use kp directly
+            console.log("Exported JWK:", publicKeyJwk); // <-- Add this
             setQrValue(JSON.stringify({ code: code, publicKey: publicKeyJwk })); // Update QR value here
+            console.log("QR Payload:", { code: code, publicKey: publicKeyJwk });
 
             // Register our code with the server
             if (socket && socket.readyState === WebSocket.OPEN) {
@@ -307,6 +327,7 @@ function App() {
                         setStatusMessage('Error: Session key not ready for offer. Please refresh.');
                         return;
                     }
+                    console.log("Received session_offer publicKeyJwk:", data.publicKeyJwk);
                     try {
                         const peerPk = await importPublicKey(data.publicKeyJwk);
                         setPeerPublicKey(peerPk);
@@ -320,6 +341,7 @@ function App() {
                         console.log(`[onmessage-session_offer] Setting peerConnectionCode to: ${data.fromCode}`);
 
                         const ourPublicKeyJwk = await exportPublicKey(sessionKeyPairRef.current.publicKey);
+                        console.log("Exported JWK:", ourPublicKeyJwk); // <-- Add this
                         socket.send(JSON.stringify({
                             type: 'session_answer',
                             toCode: data.fromCode,
@@ -388,31 +410,7 @@ function App() {
         socket.onclose = () => {
             console.log('Disconnected from WebSocket signaling server.');
             setConnectionStatus('Disconnected');
-            setStatusMessage('Disconnected from signaling server. Please refresh to start a new session.');
-            // Clear all session-related state on disconnect to enforce ephemerality
-            setSessionKeyPair(null);
-            sessionKeyPairRef.current = null;
-            setPeerPublicKey(null);
-            setSharedSecret(null);
-            setMyConnectionCode('');
-            myConnectionCodeRef.current = '';
-            setPeerConnectionCode('');
-            peerConnectionCodeRef.current = '';
-            iceCandidatesQueueRef.current = [];
-            setQrValue('');
-            setChatMessages([]);
-            setCurrentFileDisplay(null);
-            setFileToShare(null);
-            setTransferringFile(false);
-            if (fileTimerRef.current) clearTimeout(fileTimerRef.current);
-            if (peerConnectionRef.current) {
-                peerConnectionRef.current.close();
-                peerConnectionRef.current = null;
-            }
-            if (dataChannelRef.current) {
-                dataChannelRef.current.close();
-                dataChannelRef.current = null;
-            }
+            setStatusMessage('Connection lost. Please refresh to start a new secure session.');
         };
 
         socket.onerror = error => {
@@ -442,6 +440,7 @@ function App() {
         myConnectionCodeRef.current = code; // Update ref
 
         const publicKeyJwk = await exportPublicKey(sessionKeyPair.publicKey);
+        console.log("Exported JWK:", publicKeyJwk); // <-- Add this
         const qrData = JSON.stringify({ code: code, publicKey: publicKeyJwk });
         setQrValue(qrData);
 
@@ -464,7 +463,12 @@ function App() {
         }, 60 * 1000); // 60 seconds validity
     };
 
-    const connectToPeer = async () => {
+    const connectToPeer = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+
+    try {
+        console.log("🔹 connectToPeer triggered");
+
         if (!ws || ws.readyState !== WebSocket.OPEN) {
             setStatusMessage('Not connected to signaling server.');
             return;
@@ -478,26 +482,28 @@ function App() {
             return;
         }
 
-        // Remember the peer's code we are trying to connect to
-        setPeerConnectionCode(inputConnectionCode); // Update state for UI
-        peerConnectionCodeRef.current = inputConnectionCode; // Update ref immediately
+        setPeerConnectionCode(inputConnectionCode);
+        peerConnectionCodeRef.current = inputConnectionCode;
         console.log(`[connectToPeer] Setting peerConnectionCode to: ${inputConnectionCode}`);
         console.log(`[connectToPeer] myConnectionCode is: ${myConnectionCode}`);
 
-        try {
-            const ourPublicKeyJwk = await exportPublicKey(sessionKeyPair.publicKey);
-            ws.send(JSON.stringify({
-                type: 'session_offer',
-                toCode: inputConnectionCode, // Use direct inputConnectionCode here
-                fromCode: myConnectionCodeRef.current // Use current value from ref
-            }));
-            console.log(`[connectToPeer] Sent session_offer with toCode: ${inputConnectionCode}, fromCode: ${myConnectionCodeRef.current}`);
-            setStatusMessage(`Sending connection offer to peer with code: ${inputConnectionCode}`);
-        } catch (error) {
-            console.error('Error sending session offer:', error);
-            setStatusMessage('Failed to send connection offer: ' + error.message);
-        }
-    };
+        const ourPublicKeyJwk = await exportPublicKey(sessionKeyPair.publicKey);
+        console.log("Exported JWK (sender):", ourPublicKeyJwk);
+
+        ws.send(JSON.stringify({
+            type: 'session_offer',
+            toCode: inputConnectionCode,
+            fromCode: myConnectionCodeRef.current,
+            publicKeyJwk: ourPublicKeyJwk
+        }));
+        console.log(`[connectToPeer] Sent session_offer`);
+
+        setStatusMessage(`Sending connection offer to peer with code: ${inputConnectionCode}`);
+    } catch (err) {
+        console.error("❌ connectToPeer error:", err);
+    }
+};
+
 
     // --- Messaging Functions ---
 
@@ -629,7 +635,7 @@ function App() {
                                 onChange={e => setInputConnectionCode(e.target.value)}
                                 placeholder="Enter peer's code to connect"
                             />
-                            <button onClick={connectToPeer}>Connect to Peer</button>
+                            <button type="button" onClick={connectToPeer}>Connect to Peer</button>
                         </div>
                     </div>
                 )}

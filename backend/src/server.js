@@ -4,7 +4,7 @@ require('dotenv').config();
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
-const path = require('path'); // Added for static file serving in production build
+const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
@@ -12,20 +12,19 @@ const wss = new WebSocket.Server({ server });
 
 const PORT = process.env.PORT || 8080;
 
-// Serve static files from the React build directory (e.g., 'public' or 'build')
-// Adjust this path based on where your React build output will eventually go.
-// For development with `npm start` in frontend, this might not be hit much,
-// but it's essential for a combined production build.
-app.use(express.static(path.join(__dirname, '../public'))); // Assumes 'public' in backend root
+// Serve static files (adjust path for production)
+app.use(express.static(path.join(__dirname, '../public')));
 
 // --- Global map to store active clients by their connection codes ---
 const clients = new Map(); // Map: code -> WebSocket instance
+const sessions = new Map(); // sessionID -> { clientA, clientB }
 
 // --- WebSocket connection handling ---
 wss.on('connection', ws => {
     console.log('Client connected to WebSocket.');
+    console.log('🧠 New client connected to WebSocket.');
 
-    // Assign a temporary unique ID to this WebSocket for internal tracking before a code is assigned
+    // Assign a temporary ID for this client
     ws.id = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     console.log(`Assigned temp ID: ${ws.id}`);
 
@@ -35,9 +34,9 @@ wss.on('connection', ws => {
             console.log(`Received signaling message from ${data.fromCode || ws.id}:`, data.type);
 
             switch (data.type) {
-                case 'register_code': // New type: Client tells server its code
+                case 'register_code':
                     if (data.code) {
-                        // If this WS was previously registered with a different code, remove it
+                        // Remove old code if same socket is re-registering
                         for (let [code, clientWs] of clients.entries()) {
                             if (clientWs === ws) {
                                 clients.delete(code);
@@ -45,7 +44,7 @@ wss.on('connection', ws => {
                             }
                         }
                         clients.set(data.code, ws);
-                        ws.code = data.code; // Store the code on the WebSocket object itself
+                        ws.code = data.code;
                         console.log(`Client ${ws.id} registered with code: ${data.code}`);
                         ws.send(JSON.stringify({ type: 'registration_success', code: data.code }));
                     } else {
@@ -58,17 +57,16 @@ wss.on('connection', ws => {
                 case 'webrtc_offer':
                 case 'webrtc_answer':
                 case 'webrtc_ice_candidate':
-                case 'encrypted_message': // For fallback if WebRTC isn't ready
+                case 'encrypted_message':
                     if (data.toCode) {
                         const targetClient = clients.get(data.toCode);
                         if (targetClient && targetClient.readyState === WebSocket.OPEN) {
-                            // Forward the message to the target peer
-                            // Remove sensitive routing info before forwarding if necessary
-                            const { toCode, ...messageToForward } = data;
+                            const messageToForward = { ...data };
+                            delete messageToForward.toCode; // only strip routing info
                             targetClient.send(JSON.stringify(messageToForward));
                             console.log(`Relayed ${data.type} from ${data.fromCode || ws.code || ws.id} to ${data.toCode}`);
                         } else {
-                            console.warn(`Target client ${data.toCode} not found or not open for ${data.type} from ${data.fromCode || ws.code || ws.id}`);
+                            console.warn(`Target client ${data.toCode} not found or not open for ${data.type}`);
                             ws.send(JSON.stringify({ type: 'error', message: `Peer ${data.toCode} not found or offline.` }));
                         }
                     } else {
@@ -89,10 +87,16 @@ wss.on('connection', ws => {
 
     ws.on('close', () => {
         console.log(`Client ${ws.code || ws.id} disconnected.`);
-        // Remove the client from the map when they disconnect
+        // Don't remove it instantly. Let it timeout naturally.
+        // Optionally: Set a short-lived cleanup timeout
         if (ws.code && clients.has(ws.code)) {
-            clients.delete(ws.code);
-            console.log(`Client ${ws.code} removed from active connections.`);
+            console.log(`Client ${ws.code} marked as disconnected — keeping for 10s just in case`);
+            setTimeout(() => {
+                if (clients.get(ws.code) === ws) {
+                    clients.delete(ws.code);
+                    console.log(`Client ${ws.code} fully removed after timeout.`);
+                }
+            }, 10_000); // 10 seconds grace period
         }
     });
 
