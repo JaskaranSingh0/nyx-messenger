@@ -353,7 +353,9 @@ function App() {
                         setStatusMessage('Shared secret derived. Secure session established! Setting up WebRTC...');
                         setConnectionStatus('Secure Session Active');
                         // Pass explicit current codes to setupWebRTC
-                        setupWebRTC(socket, true, currentMyCode, data.fromCode);
+                        setTimeout(() => {
+                            setupWebRTC(socket, true, currentMyCode, data.fromCode);
+                        }, 100); // or even 250ms
                     } catch (error) {
                         console.error('Error handling session offer:', error);
                         setStatusMessage('Failed to establish session: ' + error.message);
@@ -378,7 +380,9 @@ function App() {
                         setStatusMessage('Shared secret derived. Secure session established! Setting up WebRTC...');
                         setConnectionStatus('Secure Session Active');
                         // Pass explicit current codes to setupWebRTC
-                        setupWebRTC(socket, false, currentMyCode, currentPeerCode);
+                        setTimeout(() => {
+                            setupWebRTC(socket, false, currentMyCode, currentPeerCode);
+                        }, 100); // or even 250ms
                     } catch (error) {
                         console.error('Error handling session answer:', error);
                         setStatusMessage('Failed to establish session: ' + error.message);
@@ -423,7 +427,7 @@ function App() {
 
         return () => {
             if (socket.readyState === WebSocket.OPEN) {
-                socket.close();
+                console.log("Component unmounting — not closing WebSocket (let server timeout).");
             }
         };
     }, [handleReceivedMessage, setupWebRTC, handleWebRTCSignaling]); // Dependencies are now just the memoized callbacks
