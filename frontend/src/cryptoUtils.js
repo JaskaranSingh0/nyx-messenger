@@ -1,5 +1,3 @@
-// frontend/src/cryptoUtils.js
-
 const ECDH_ALGO = {
     name: "ECDH",
     namedCurve: "P-256"
@@ -12,6 +10,9 @@ const AES_ALGO = {
 
 const HASH_ALGO = "SHA-256";
 
+/**
+ * Generates a new ECDH key pair for a session.
+ */
 export async function generateSessionKeyPair() {
     return await window.crypto.subtle.generateKey(
         ECDH_ALGO,
@@ -20,36 +21,57 @@ export async function generateSessionKeyPair() {
     );
 }
 
+/**
+ * Derives a 256-bit AES key from ECDH key agreement.
+ * @param {CryptoKey} privateKey 
+ * @param {CryptoKey} publicKey 
+ * @returns {Promise<ArrayBuffer>} raw shared secret (32 bytes)
+ */
 export async function deriveSharedSecret(privateKey, publicKey) {
-    return await window.crypto.subtle.deriveKey(
-        { name: ECDH_ALGO.name, public: publicKey },
+    const bits = await window.crypto.subtle.deriveBits(
+        {
+            name: ECDH_ALGO.name,
+            public: publicKey
+        },
         privateKey,
-        AES_ALGO,
-        true,
-        ["encrypt", "decrypt"]
+        AES_ALGO.length
     );
+    console.log("🔑 Derived shared secret (length):", bits.byteLength);
+    return bits;
 }
 
 /**
- * Encrypts data (string or ArrayBuffer) using AES-GCM.
- * @param {CryptoKey} key The symmetric AES-GCM key.
- * @param {string | ArrayBuffer} dataToEncrypt The data to encrypt (text or binary).
+ * Encrypts data using AES-GCM.
+ * @param {ArrayBuffer} sharedSecret Raw 256-bit key
+ * @param {string | ArrayBuffer} dataToEncrypt 
  * @returns {Promise<{ciphertext: ArrayBuffer, iv: Uint8Array}>}
  */
-export async function encryptMessage(key, dataToEncrypt) {
+export async function encryptMessage(sharedSecret, dataToEncrypt) {
+    const key = await window.crypto.subtle.importKey(
+        'raw',
+        sharedSecret,
+        { name: 'AES-GCM' },
+        false,
+        ['encrypt']
+    );
+
     let encoded;
     if (typeof dataToEncrypt === 'string') {
         encoded = new TextEncoder().encode(dataToEncrypt);
     } else if (dataToEncrypt instanceof ArrayBuffer) {
-        encoded = new Uint8Array(dataToEncrypt); // Use Uint8Array view for encryption
+        encoded = new Uint8Array(dataToEncrypt); // binary
     } else {
-        throw new Error('Data to encrypt must be string or ArrayBuffer.');
+        throw new Error('Data to encrypt must be a string or ArrayBuffer.');
     }
 
     const iv = window.crypto.getRandomValues(new Uint8Array(12));
+    console.log("📦 Encrypting", {
+        dataLength: encoded.byteLength,
+        iv
+    });
 
     const ciphertext = await window.crypto.subtle.encrypt(
-        { name: AES_ALGO.name, iv: iv },
+        { name: AES_ALGO.name, iv },
         key,
         encoded
     );
@@ -58,21 +80,45 @@ export async function encryptMessage(key, dataToEncrypt) {
 }
 
 /**
- * Decrypts a message using AES-GCM.
- * @param {CryptoKey} key The symmetric AES-GCM key.
- * @param {ArrayBuffer} ciphertext The encrypted message data.
- * @param {Uint8Array} iv The Initialization Vector used during encryption.
- * @returns {Promise<ArrayBuffer>} The decrypted data as an ArrayBuffer.
+ * Decrypts data using AES-GCM.
+ * @param {ArrayBuffer} sharedSecret Raw 256-bit key
+ * @param {ArrayBuffer} ciphertext 
+ * @param {Uint8Array} iv 
+ * @returns {Promise<ArrayBuffer>}
  */
-export async function decryptMessage(key, ciphertext, iv) {
+export async function decryptMessage(sharedSecret, ciphertext, iv) {
+    if (!(iv instanceof Uint8Array) || iv.length !== 12) {
+        throw new Error("Invalid IV. Must be 12-byte Uint8Array.");
+    }
+
+    console.log("🔐 Decrypting message", {
+        ciphertextLength: ciphertext.byteLength || ciphertext.length,
+        iv
+    });
+
+    const key = await window.crypto.subtle.importKey(
+        'raw',
+        sharedSecret,
+        { name: 'AES-GCM' },
+        false,
+        ['decrypt']
+    );
+
     const decrypted = await window.crypto.subtle.decrypt(
-        { name: AES_ALGO.name, iv: iv },
+        {
+            name: 'AES-GCM',
+            iv
+        },
         key,
         ciphertext
     );
-    return decrypted; // Will be an ArrayBuffer
+
+    return decrypted; // Still ArrayBuffer
 }
 
+/**
+ * Exports a public ECDH key to JWK for sharing.
+ */
 export async function exportPublicKey(publicKey) {
     return await window.crypto.subtle.exportKey(
         "jwk",
@@ -80,6 +126,10 @@ export async function exportPublicKey(publicKey) {
     );
 }
 
+/**
+ * Imports a public ECDH key from a JWK.
+ * @param {JsonWebKey} jwk 
+ */
 export async function importPublicKey(jwk) {
     return await window.crypto.subtle.importKey(
         "jwk",
@@ -90,16 +140,23 @@ export async function importPublicKey(jwk) {
     );
 }
 
+/**
+ * Generates a random alphanumeric code (for pairing).
+ */
 export function generateRandomCode(length = 8) {
     const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
     let result = '';
     const bytes = window.crypto.getRandomValues(new Uint8Array(length));
-    bytes.forEach(byte => {
-        result += characters[byte % characters.length];
-    });
+    for (let i = 0; i < length; i++) {
+        result += characters[bytes[i] % characters.length];
+    }
     return result;
 }
 
+/**
+ * Overwrites sensitive buffers with 0s in-place.
+ * @param {ArrayBuffer | Uint8Array} buffer 
+ */
 export function zeroFill(buffer) {
     if (buffer instanceof ArrayBuffer) {
         const view = new Uint8Array(buffer);
@@ -107,6 +164,6 @@ export function zeroFill(buffer) {
     } else if (buffer instanceof Uint8Array) {
         buffer.fill(0);
     }
-    // Note: This does not remove the object from memory, just overwrites its content.
-    // JS garbage collection determines when it's fully freed.
+    // Memory is not actually freed (JS garbage collection),
+    // but this prevents recovery in memory snapshots.
 }

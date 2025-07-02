@@ -23,6 +23,7 @@ function App() {
     const sessionKeyPairRef = useRef(null); // Ref for latest sessionKeyPair
     const [peerPublicKey, setPeerPublicKey] = useState(null);
     const [sharedSecret, setSharedSecret] = useState(null);
+    const sharedSecretRef = useRef(null); // NEW
     const [myConnectionCode, setMyConnectionCode] = useState('');
     const myConnectionCodeRef = useRef(''); // Ref for latest myConnectionCode
     const [peerConnectionCode, setPeerConnectionCode] = useState('');
@@ -37,6 +38,10 @@ function App() {
     const [currentFileDisplay, setCurrentFileDisplay] = useState(null);
     const fileTimerRef = useRef(null);
     const [transferringFile, setTransferringFile] = useState(false);
+
+    //message queue
+    const [queuedEncryptedMessages, setQueuedEncryptedMessages] = useState([]);
+
 
     // WebRTC refs
     const peerConnectionRef = useRef(null);
@@ -55,25 +60,32 @@ function App() {
     }, [currentFileDisplay]);
 
     // Callback to handle incoming encrypted messages
-    const handleReceivedMessage = useCallback(async (encryptedData) => {
-        if (!sharedSecret) {
-            console.warn('Received message before shared secret was established.');
+    const handleReceivedMessage = useCallback(async (encryptedData, secret) => {
+        if (!secret) {
+            console.warn('Received message without a valid shared secret.');
             return;
         }
         try {
             const { content, iv, type, fileMetadata } = encryptedData;
             const ciphertext = new Uint8Array(content).buffer;
             const ivArr = new Uint8Array(iv);
+            console.log("Received ciphertext length:", content.length);
+            console.log("Received IV length:", iv.length);  
 
             if (type === 'text') {
-                const decryptedBuffer = await decryptMessage(sharedSecret, ciphertext, ivArr); // Decrypted as ArrayBuffer
+                
+                console.log("🧾 Encrypted text message received:", encryptedData);
+                const decryptedBuffer = await decryptMessage(secret, ciphertext, ivArr); // Decrypted as ArrayBuffer
                 const decryptedText = new TextDecoder().decode(decryptedBuffer); // Decode as text
+                console.log("✅ Decrypted Text:", decryptedText);
+
+
                 setChatMessages(prev => [...prev, { sender: 'peer', content: decryptedText, type: 'text' }]);
             } else if (type === 'file') {
                 setTransferringFile(true);
                 setStatusMessage(`Receiving ephemeral file: ${fileMetadata.name}...`);
 
-                const decryptedFileBuffer = await decryptMessage(sharedSecret, ciphertext, ivArr);
+                const decryptedFileBuffer = await decryptMessage(secret, ciphertext, ivArr);
                 const fileBlob = new Blob([decryptedFileBuffer], { type: fileMetadata.mimeType });
                 const fileURL = URL.createObjectURL(fileBlob);
 
@@ -100,7 +112,13 @@ function App() {
             console.error('Error decrypting message:', error);
             setStatusMessage('Failed to decrypt message: ' + error.message);
         }
-    }, [sharedSecret, clearFileDisplay]); // `sharedSecret` is a dependency here.
+    }, [clearFileDisplay]); // `sharedSecret` is removed, `clearFileDisplay` is the dependency.
+
+
+    const decryptAndDisplayMessage = useCallback(async (message, secret) => {
+        await handleReceivedMessage(message, secret);
+    }, [handleReceivedMessage]);
+
 
     // Callback to bind data channel events
     const bindDataChannelEvents = useCallback((dataChannel) => {
@@ -110,10 +128,16 @@ function App() {
             setStatusMessage('You are now directly connected peer-to-peer! Messaging is direct.');
         };
         dataChannel.onmessage = (event) => {
-            console.log('Received data from peer channel:', event.data);
-            try {
+             console.log('Received data from peer channel:', event.data);
+             try {
                 const parsedData = JSON.parse(event.data);
-                handleReceivedMessage(parsedData);
+                const secret = sharedSecretRef.current;
+                if (!secret) {
+                console.warn("❌ No shared secret yet, queuing...");
+                setQueuedEncryptedMessages(prev => [...prev, parsedData]);
+                return;
+            }
+            handleReceivedMessage(parsedData, secret);
             } catch (e) {
                 console.error('Failed to parse incoming data channel message:', e);
             }
@@ -127,7 +151,7 @@ function App() {
             console.error('WebRTC Data Channel ERROR:', error);
             setStatusMessage('WebRTC channel error: ' + error.message);
         };
-    }, [handleReceivedMessage]);
+    }, [handleReceivedMessage, sharedSecret]);
 
     // Callback for handling WebRTC signaling messages
     const handleWebRTCSignaling = useCallback(async (data, myCode, targetPeerCode, currentPeerConnectionRef, currentWs) => {
@@ -335,6 +359,13 @@ function App() {
                         // Use sessionKeyPairRef.current for immediate access
                         const ss = await deriveSharedSecret(sessionKeyPairRef.current.privateKey, peerPk);
                         setSharedSecret(ss);
+                        sharedSecretRef.current = ss; // ✅ Keep ref in sync
+                        if (queuedEncryptedMessages.length > 0) {
+                            console.log("🔓 Decrypting queued messages...");
+                            queuedEncryptedMessages.forEach(msg => decryptAndDisplayMessage(msg, ss));
+                            setQueuedEncryptedMessages([]);
+                        }
+
 
                         setPeerConnectionCode(data.fromCode); // Update state for UI
                         peerConnectionCodeRef.current = data.fromCode; // Update ref immediately
@@ -377,6 +408,13 @@ function App() {
                         // Use sessionKeyPairRef.current for immediate access
                         const ss = await deriveSharedSecret(sessionKeyPairRef.current.privateKey, peerPk);
                         setSharedSecret(ss);
+                        sharedSecretRef.current = ss; // ✅ Keep ref in sync
+                        if (queuedEncryptedMessages.length > 0) {
+                            console.log("🔓 Decrypting queued messages...");
+                            queuedEncryptedMessages.forEach(msg => decryptAndDisplayMessage(msg, ss));
+                            setQueuedEncryptedMessages([]);
+                        }
+
                         setStatusMessage('Shared secret derived. Secure session established! Setting up WebRTC...');
                         setConnectionStatus('Secure Session Active');
                         // Pass explicit current codes to setupWebRTC
@@ -397,9 +435,15 @@ function App() {
                     break;
 
                 case 'encrypted_message':
-                    // Fallback for E2EE text messages if WebRTC not ready
-                    handleReceivedMessage(data.message);
+                    const secret = sharedSecretRef.current;
+                    if (!secret) {
+                        console.warn("🔐 Received message before shared secret was established. Queuing.");
+                        setQueuedEncryptedMessages(prev => [...prev, data.message]);
+                        return;
+                    }
+                    decryptAndDisplayMessage(data.message, secret);
                     break;
+
 
                 case 'error':
                     console.error('Server error:', data.message);
@@ -430,7 +474,7 @@ function App() {
                 console.log("Component unmounting — not closing WebSocket (let server timeout).");
             }
         };
-    }, [handleReceivedMessage, setupWebRTC, handleWebRTCSignaling]); // Dependencies are now just the memoized callbacks
+    }, [handleReceivedMessage, setupWebRTC, handleWebRTCSignaling, decryptAndDisplayMessage, sharedSecret]); // Dependencies are now just the memoized callbacks
 
     // --- Connection Code / QR Code Generation & Handling ---
 
@@ -525,6 +569,8 @@ function App() {
                 content: Array.from(new Uint8Array(ciphertext)),
                 iv: Array.from(iv)
             };
+
+            console.log("📤 Sending encrypted text:", messageData);
 
             if (dataChannelRef.current && dataChannelRef.current.readyState === 'open') {
                 dataChannelRef.current.send(JSON.stringify(messageData));
@@ -648,11 +694,14 @@ function App() {
                     <div className="chat-section">
                         <h2>Secure Chat</h2>
                         <div className="message-list" style={{ overflowY: 'auto', maxHeight: '300px', border: '1px solid #61dafb', padding: '10px', borderRadius: '5px', marginBottom: '10px' }}>
-                            {chatMessages.map((msg, index) => (
-                                <p key={index} className={msg.sender === 'me' ? 'my-message' : 'peer-message'}>
-                                    <strong>{msg.sender === 'me' ? 'You:' : 'Peer:'}</strong> {msg.content}
-                                </p>
-                            ))}
+                            {chatMessages.map((msg, index) => {
+                                console.log("💬 Rendering message:", msg);
+                                return (
+                                    <p key={index} className={msg.sender === 'me' ? 'my-message' : 'peer-message'}>
+                                        <strong>{msg.sender === 'me' ? 'You:' : 'Peer:'}</strong> {msg.content}
+                                    </p>
+                                );
+                            })}
                         </div>
                         <div className="message-input">
                             <input
@@ -662,7 +711,17 @@ function App() {
                                 onKeyPress={e => { if (e.key === 'Enter') sendTextMessage(); }}
                                 placeholder="Type your ephemeral message..."
                             />
-                            <button onClick={sendTextMessage} disabled={!dataChannelRef.current || dataChannelRef.current.readyState !== 'open'}>Send Message</button>
+                            <button
+                                onClick={sendTextMessage}
+                                disabled={
+                                    !sharedSecret ||                     // 🔐 shared secret must be derived
+                                    !dataChannelRef.current || 
+                                    dataChannelRef.current.readyState !== 'open'
+                                }
+                                >
+                                Send Message
+                            </button>
+
                         </div>
 
                         <div className="file-sharing" style={{ marginTop: '20px', borderTop: '1px solid #61dafb', paddingTop: '20px' }}>
