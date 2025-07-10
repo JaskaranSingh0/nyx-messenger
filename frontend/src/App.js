@@ -41,10 +41,15 @@ function App() {
     const fileTimerRef = useRef(null);
     const [transferringFile, setTransferringFile] = useState(false);
 
+    // This prevents us from sending too many messages
+    const typingTimeoutRef = useRef(null);
 
     // new state variables for SAS
     const [authenticationString, setAuthenticationString] = useState('');
     const [isVerified, setIsVerified] = useState(false); // Tracks if the user has confirmed the SAS
+
+    //track if the peer is typing
+    const [isPeerTyping, setIsPeerTyping] = useState(false);
 
     //const [incomingFileChunks, setIncomingFileChunks] = useState(new Map());
     const incomingFileChunksRef = useRef(new Map());
@@ -153,7 +158,6 @@ function App() {
                     }
 
                     transfer.chunks[parsedData.chunkIndex] = parsedData;
-
                     const receivedChunks = transfer.chunks.filter(c => c).length;
                     setStatusMessage(`Receiving file... ${Math.round((receivedChunks / transfer.totalChunks) * 100)}%`);
 
@@ -190,6 +194,14 @@ function App() {
                         incomingFileChunksRef.current.delete(parsedData.fileId);
                         setTransferringFile(false);
                     }
+                    break;
+
+                case 'typing_start':
+                    setIsPeerTyping(true);
+                    break;
+
+                case 'typing_stop':
+                    setIsPeerTyping(false);
                     break;
 
                 default:
@@ -664,6 +676,33 @@ function App() {
     }
 };
 
+    // --- Typing Indicator Functions ---
+
+    const handleTyping = () => {
+        // Don't send typing events if the channel isn't open
+        if (!dataChannelRef.current || dataChannelRef.current.readyState !== 'open') {
+            return;
+        }
+
+        // Send a 'start' event immediately
+        dataChannelRef.current.send(JSON.stringify({ type: 'typing_start' }));
+
+        // Clear any existing timeout
+        if (typingTimeoutRef.current) {
+            clearTimeout(typingTimeoutRef.current);
+        }
+
+        // Set a new timeout. If the user doesn't type again for 2 seconds,
+        // we'll send a 'stop' event.
+        typingTimeoutRef.current = setTimeout(() => {
+            if (dataChannelRef.current && dataChannelRef.current.readyState === 'open') {
+                dataChannelRef.current.send(JSON.stringify({ type: 'typing_stop' }));
+            }
+        }, 2000); // 2 seconds
+    };
+
+
+
 
     // --- Messaging Functions ---
 
@@ -673,6 +712,14 @@ function App() {
             return;
         }
         if (!messageInput.trim()) return;
+
+        if (typingTimeoutRef.current) {
+            clearTimeout(typingTimeoutRef.current);
+            typingTimeoutRef.current = null;
+        }
+        if (dataChannelRef.current && dataChannelRef.current.readyState === 'open') {
+            dataChannelRef.current.send(JSON.stringify({ type: 'typing_stop' }));
+        }
 
         try {
             const { ciphertext, iv } = await encryptMessage(sharedSecret, messageInput);
@@ -920,11 +967,15 @@ function App() {
                         );
                     })}
                 </div>
+                <div style={{ height: '20px', textAlign: 'left', paddingLeft: '10px', fontStyle: 'italic', color: '#aaa' }}>
+                    {isPeerTyping && <p>Peer is typing...</p>}
+                </div>
                 <div className="message-input">
                     <input
                         type="text"
                         value={messageInput}
                         onChange={e => setMessageInput(e.target.value)}
+                        onKeyDown={handleTyping}
                         onKeyPress={e => { if (e.key === 'Enter') sendTextMessage(); }}
                         placeholder="Type your ephemeral message..."
                     />
