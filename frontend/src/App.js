@@ -31,13 +31,15 @@ function App() {
     const [statusMessage, setStatusMessage] = useState('');
     const [qrValue, setQrValue] = useState('');
     const [inputConnectionCode, setInputConnectionCode] = useState('');
- 
+    
     // File sharing state
     const [fileToShare, setFileToShare] = useState(null);
     const [viewDuration, setViewDuration] = useState(5);
     const [currentFileDisplay, setCurrentFileDisplay] = useState(null);
     const fileTimerRef = useRef(null);
     const [transferringFile, setTransferringFile] = useState(false);
+    //const [incomingFileChunks, setIncomingFileChunks] = useState(new Map());
+    const incomingFileChunksRef = useRef(new Map());
 
     //message queue
     const [queuedEncryptedMessages, setQueuedEncryptedMessages] = useState([]);
@@ -66,53 +68,28 @@ function App() {
             return;
         }
         try {
-            const { content, iv, type, fileMetadata } = encryptedData;
+            // This function now only handles TEXT messages.
+            // File messages are handled directly in the data channel's onmessage.
+            if (encryptedData.type !== 'text') {
+                return;
+            }
+            
+            const { content, iv } = encryptedData;
             const ciphertext = new Uint8Array(content).buffer;
             const ivArr = new Uint8Array(iv);
-            console.log("Received ciphertext length:", content.length);
-            console.log("Received IV length:", iv.length);  
 
-            if (type === 'text') {
-                
-                console.log("🧾 Encrypted text message received:", encryptedData);
-                const decryptedBuffer = await decryptMessage(secret, ciphertext, ivArr); // Decrypted as ArrayBuffer
-                const decryptedText = new TextDecoder().decode(decryptedBuffer); // Decode as text
-                console.log("✅ Decrypted Text:", decryptedText);
+            const decryptedBuffer = await decryptMessage(secret, ciphertext, ivArr);
+            const decryptedText = new TextDecoder().decode(decryptedBuffer);
 
+            setChatMessages(prev => [...prev, { sender: 'peer', content: decryptedText, type: 'text' }]);
 
-                setChatMessages(prev => [...prev, { sender: 'peer', content: decryptedText, type: 'text' }]);
-            } else if (type === 'file') {
-                setTransferringFile(true);
-                setStatusMessage(`Receiving ephemeral file: ${fileMetadata.name}...`);
-
-                const decryptedFileBuffer = await decryptMessage(secret, ciphertext, ivArr);
-                const fileBlob = new Blob([decryptedFileBuffer], { type: fileMetadata.mimeType });
-                const fileURL = URL.createObjectURL(fileBlob);
-
-                setCurrentFileDisplay({
-                    url: fileURL,
-                    name: fileMetadata.name,
-                    type: fileMetadata.mimeType,
-                    size: fileMetadata.size,
-                    duration: fileMetadata.duration
-                });
-
-                if (fileTimerRef.current) clearTimeout(fileTimerRef.current);
-                fileTimerRef.current = setTimeout(() => {
-                    clearFileDisplay();
-                    setStatusMessage('Ephemeral file display expired and cleared.');
-                }, fileMetadata.duration * 1000);
-
-                setTransferringFile(false);
-            }
             zeroFill(ciphertext);
             zeroFill(ivArr.buffer);
-
         } catch (error) {
             console.error('Error decrypting message:', error);
             setStatusMessage('Failed to decrypt message: ' + error.message);
         }
-    }, [clearFileDisplay]); // `sharedSecret` is removed, `clearFileDisplay` is the dependency.
+    }, []); // No dependencies needed anymore
 
 
     const decryptAndDisplayMessage = useCallback(async (message, secret) => {
@@ -127,29 +104,94 @@ function App() {
             setConnectionStatus('Secure WebRTC Channel Active');
             setStatusMessage('You are now directly connected peer-to-peer! Messaging is direct.');
         };
-        dataChannel.onmessage = (event) => {
-             console.log('Received data from peer channel:', event.data);
-             try {
-                const parsedData = JSON.parse(event.data);
-                console.log("📩 Received message:", parsedData); // Added log statement
+       
+        
 
-                const secret = sharedSecretRef.current;
-                if (!secret) {
-                    console.warn("❌ No shared secret yet, queuing...");
-                    setQueuedEncryptedMessages(prev => [...prev, parsedData]);
-                    return;
-                }
+    dataChannel.onmessage = async (event) => {
+        try {
+            const parsedData = JSON.parse(event.data);
+            const secret = sharedSecretRef.current;
 
-                const { type } = parsedData;
-                if (type === 'file') {
-                    console.log("📂 Handling file type..."); // Added log statement
-                }
-
-                handleReceivedMessage(parsedData, secret);
-            } catch (e) {
-                console.error('Failed to parse incoming data channel message:', e);
+            if (!secret) {
+                console.warn("❌ No shared secret yet, queuing...");
+                setQueuedEncryptedMessages(prev => [...prev, parsedData]);
+                return;
             }
-        };
+
+            switch (parsedData.type) {
+                case 'text':
+                    console.log("📩 Received text message via data channel");
+                    await handleReceivedMessage(parsedData, secret);
+                    break;
+
+                case 'file_meta':
+                    console.log(`📂 Received metadata for file: ${parsedData.fileId}`);
+                    // Use the ref directly. This is a synchronous update.
+                    incomingFileChunksRef.current.set(parsedData.fileId, {
+                        metadata: parsedData.fileMetadata,
+                        totalChunks: parsedData.totalChunks,
+                        chunks: []
+                    });
+                    setStatusMessage(`Receiving ephemeral file: ${parsedData.fileMetadata.name}...`);
+                    setTransferringFile(true);
+                    break;
+
+                case 'file_chunk':
+                    // Read from the ref to get the most current data.
+                    const transfer = incomingFileChunksRef.current.get(parsedData.fileId);
+                    if (!transfer) {
+                        console.warn(`Received chunk for unknown fileId: ${parsedData.fileId}`);
+                        return;
+                    }
+
+                    transfer.chunks[parsedData.chunkIndex] = parsedData;
+
+                    const receivedChunks = transfer.chunks.filter(c => c).length;
+                    setStatusMessage(`Receiving file... ${Math.round((receivedChunks / transfer.totalChunks) * 100)}%`);
+
+                    if (receivedChunks === transfer.totalChunks) {
+                        console.log(`✅ All ${transfer.totalChunks} chunks received for ${transfer.metadata.name}. Assembling...`);
+                        
+                        const decryptedChunks = [];
+                        for (let i = 0; i < transfer.totalChunks; i++) {
+                            const chunkData = transfer.chunks[i];
+                            const ciphertext = new Uint8Array(chunkData.content).buffer;
+                            const ivArr = new Uint8Array(chunkData.iv);
+                            const decryptedBuffer = await decryptMessage(secret, ciphertext, ivArr);
+                            decryptedChunks.push(new Blob([decryptedBuffer]));
+                        }
+
+                        const fileBlob = new Blob(decryptedChunks, { type: transfer.metadata.mimeType });
+                        const fileURL = URL.createObjectURL(fileBlob);
+
+                        setCurrentFileDisplay({
+                            url: fileURL,
+                            name: transfer.metadata.name,
+                            type: transfer.metadata.mimeType,
+                            size: transfer.metadata.size,
+                            duration: transfer.metadata.duration
+                        });
+
+                        if (fileTimerRef.current) clearTimeout(fileTimerRef.current);
+                        fileTimerRef.current = setTimeout(() => {
+                            clearFileDisplay();
+                            setStatusMessage('Ephemeral file display expired and cleared.');
+                        }, transfer.metadata.duration * 1000);
+                        
+                        // Clean up the completed transfer from the ref
+                        incomingFileChunksRef.current.delete(parsedData.fileId);
+                        setTransferringFile(false);
+                    }
+                    break;
+
+                default:
+                    console.warn(`Unknown message type received on data channel: ${parsedData.type}`);
+            }
+        } catch (e) {
+            console.error('Failed to parse incoming data channel message:', e);
+        }
+    };
+
         dataChannel.onclose = () => {
             console.log('WebRTC Data Channel CLOSED!');
             setConnectionStatus('Secure Session Active (WebRTC Closed)');
@@ -648,72 +690,99 @@ function App() {
 
     const sendFile = async () => {
     if (!fileToShare || !sharedSecret) {
-        console.warn("❌ No file selected or shared secret not available.");
         setStatusMessage('No file selected or secure session not established.');
         return;
     }
-
     if (!dataChannelRef.current || dataChannelRef.current.readyState !== 'open') {
-        console.warn("❌ Data channel not open during send. Current state:", dataChannelRef.current?.readyState);
         setStatusMessage('WebRTC data channel not open. Please wait for peer connection.');
         return;
     }
 
-    setStatusMessage('Encrypting and sending file...');
+    setStatusMessage('Preparing to send file...');
     setTransferringFile(true);
 
-    const reader = new FileReader();
-    reader.onload = async (event) => {
-        const fileBuffer = event.target.result;
-        console.log("📥 File loaded into buffer:", fileBuffer);
+    const CHUNK_SIZE = 64 * 1024; // 64 KB chunks
+    const fileId = `file_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const totalChunks = Math.ceil(fileToShare.size / CHUNK_SIZE);
+    
+    console.log(`Preparing to send ${fileToShare.name} (${fileToShare.size} bytes) in ${totalChunks} chunks.`);
 
-        try {
-            const { ciphertext, iv } = await encryptMessage(sharedSecret, fileBuffer);
-            console.log("🔐 File encrypted:", {
-                ciphertextLength: ciphertext.byteLength,
-                iv: Array.from(iv)
+    try {
+        // Step 1: Send metadata message first
+        const metadataMessage = {
+            type: 'file_meta',
+            fileId: fileId,
+            totalChunks: totalChunks,
+            fileMetadata: {
+                name: fileToShare.name,
+                mimeType: fileToShare.type,
+                size: fileToShare.size,
+                duration: viewDuration
+            }
+        };
+        dataChannelRef.current.send(JSON.stringify(metadataMessage));
+        console.log("Sent file metadata:", metadataMessage);
+
+        // Step 2: Read and send each chunk
+        let offset = 0;
+        for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+            // Use a promise to handle FileReader's async nature within the loop
+            await new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                const slice = fileToShare.slice(offset, offset + CHUNK_SIZE);
+                
+                reader.onload = async (event) => {
+                    try {
+                        const fileBuffer = event.target.result;
+                        const { ciphertext, iv } = await encryptMessage(sharedSecret, fileBuffer);
+
+                        const chunkMessage = {
+                            type: 'file_chunk',
+                            fileId: fileId,
+                            chunkIndex: chunkIndex,
+                            content: Array.from(new Uint8Array(ciphertext)),
+                            iv: Array.from(iv)
+                        };
+
+                        // IMPORTANT: Wait for the buffer to clear before sending the next chunk
+                        // to avoid overwhelming the receiver.
+                        if (dataChannelRef.current.bufferedAmount > dataChannelRef.current.bufferedAmountLowThreshold) {
+                           await new Promise(res => {
+                               dataChannelRef.current.onbufferedamountlow = () => res();
+                           });
+                        }
+
+                        dataChannelRef.current.send(JSON.stringify(chunkMessage));
+                        
+                        // Clean up memory
+                        zeroFill(fileBuffer);
+                        zeroFill(new Uint8Array(ciphertext).buffer);
+                        zeroFill(iv.buffer);
+
+                        resolve();
+                    } catch (error) {
+                        reject(error);
+                    }
+                };
+                
+                reader.onerror = (err) => reject(err);
+                reader.readAsArrayBuffer(slice);
             });
-
-            const fileMessageData = {
-                type: 'file',
-                content: Array.from(new Uint8Array(ciphertext)),
-                iv: Array.from(iv),
-                fileMetadata: {
-                    name: fileToShare.name,
-                    mimeType: fileToShare.type,
-                    size: fileToShare.size,
-                    duration: viewDuration
-                }
-            };
-
-            const payload = JSON.stringify(fileMessageData);
-            console.log("📤 Sending file over WebRTC (JSON size):", payload.length);
-
-            // Send via data channel
-            dataChannelRef.current.send(payload);
-            console.log("✅ File sent over WebRTC data channel!");
-
-            setStatusMessage('File sent successfully!');
-            setFileToShare(null); // Clear selection
-            zeroFill(fileBuffer);
-            zeroFill(new Uint8Array(ciphertext).buffer);
-            zeroFill(iv);
-        } catch (error) {
-            console.error('❌ Error encrypting or sending file:', error);
-            setStatusMessage('Failed to send file: ' + error.message);
-        } finally {
-            setTransferringFile(false);
+            
+            offset += CHUNK_SIZE;
+            setStatusMessage(`Sending file... ${Math.round((offset / fileToShare.size) * 100)}%`);
         }
-    };
 
-    reader.onerror = (err) => {
-        console.error("❌ FileReader error:", err);
-        setStatusMessage('Failed to read file.');
+        console.log(`✅ All ${totalChunks} chunks for ${fileId} have been sent.`);
+        setStatusMessage('File sent successfully!');
+        setFileToShare(null); // Clear selection
+
+    } catch (error) {
+        console.error('❌ Error sending file chunks:', error);
+        setStatusMessage('Failed to send file: ' + error.message);
+    } finally {
         setTransferringFile(false);
-    };
-
-    console.log("📂 Reading file as ArrayBuffer...");
-    reader.readAsArrayBuffer(fileToShare);
+    }
 };
 
 

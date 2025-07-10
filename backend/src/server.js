@@ -17,7 +17,6 @@ app.use(express.static(path.join(__dirname, '../public')));
 
 // --- Global map to store active clients by their connection codes ---
 const clients = new Map(); // Map: code -> WebSocket instance
-const sessions = new Map(); // sessionID -> { clientA, clientB }
 
 // --- WebSocket connection handling ---
 wss.on('connection', ws => {
