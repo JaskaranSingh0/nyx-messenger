@@ -9,6 +9,7 @@ import {
     exportPublicKey,
     importPublicKey,
     generateRandomCode,
+    generateShortAuthString,
     zeroFill
 } from './cryptoUtils';
 import './App.css';
@@ -32,12 +33,19 @@ function App() {
     const [qrValue, setQrValue] = useState('');
     const [inputConnectionCode, setInputConnectionCode] = useState('');
     
+
     // File sharing state
     const [fileToShare, setFileToShare] = useState(null);
     const [viewDuration, setViewDuration] = useState(5);
     const [currentFileDisplay, setCurrentFileDisplay] = useState(null);
     const fileTimerRef = useRef(null);
     const [transferringFile, setTransferringFile] = useState(false);
+
+
+    // new state variables for SAS
+    const [authenticationString, setAuthenticationString] = useState('');
+    const [isVerified, setIsVerified] = useState(false); // Tracks if the user has confirmed the SAS
+
     //const [incomingFileChunks, setIncomingFileChunks] = useState(new Map());
     const incomingFileChunksRef = useRef(new Map());
 
@@ -422,6 +430,8 @@ function App() {
                     const ss = await deriveSharedSecret(sessionKeyPairRef.current.privateKey, peerPk);
                     setSharedSecret(ss);
                     sharedSecretRef.current = ss; // Keep ref in sync
+                    const sas = await generateShortAuthString(ss);
+                    setAuthenticationString(sas);
 
                     // If any messages were queued while waiting for the secret, decrypt them now
                     if (queuedEncryptedMessages.length > 0) {
@@ -473,6 +483,11 @@ function App() {
                         const ss = await deriveSharedSecret(sessionKeyPairRef.current.privateKey, peerPk);
                         setSharedSecret(ss);
                         sharedSecretRef.current = ss; // ✅ Keep ref in sync
+                       
+                        const sas = await generateShortAuthString(ss);
+                        setAuthenticationString(sas);
+
+
                         if (queuedEncryptedMessages.length > 0) {
                             console.log("🔓 Decrypting queued messages...");
                             queuedEncryptedMessages.forEach(msg => decryptAndDisplayMessage(msg, ss));
@@ -681,7 +696,7 @@ function App() {
                 }));
                 setChatMessages(prev => [...prev, { 
                     sender: 'me', 
-                    content: messageInput + ' (sent via server relay)', 
+                    content: messageInput, 
                     type: 'text',
                     relayed: true // <-- The new flag
                 }]);
@@ -707,102 +722,127 @@ function App() {
     };
 
     const sendFile = async () => {
-    if (!fileToShare || !sharedSecret) {
-        setStatusMessage('No file selected or secure session not established.');
-        return;
-    }
-    if (!dataChannelRef.current || dataChannelRef.current.readyState !== 'open') {
-        setStatusMessage('WebRTC data channel not open. Please wait for peer connection.');
-        return;
-    }
-
-    setStatusMessage('Preparing to send file...');
-    setTransferringFile(true);
-
-    const CHUNK_SIZE = 64 * 1024; // 64 KB chunks
-    const fileId = `file_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    const totalChunks = Math.ceil(fileToShare.size / CHUNK_SIZE);
-    
-    console.log(`Preparing to send ${fileToShare.name} (${fileToShare.size} bytes) in ${totalChunks} chunks.`);
-
-    try {
-        // Step 1: Send metadata message first
-        const metadataMessage = {
-            type: 'file_meta',
-            fileId: fileId,
-            totalChunks: totalChunks,
-            fileMetadata: {
-                name: fileToShare.name,
-                mimeType: fileToShare.type,
-                size: fileToShare.size,
-                duration: viewDuration
-            }
-        };
-        dataChannelRef.current.send(JSON.stringify(metadataMessage));
-        console.log("Sent file metadata:", metadataMessage);
-
-        // Step 2: Read and send each chunk
-        let offset = 0;
-        for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
-            // Use a promise to handle FileReader's async nature within the loop
-            await new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                const slice = fileToShare.slice(offset, offset + CHUNK_SIZE);
-                
-                reader.onload = async (event) => {
-                    try {
-                        const fileBuffer = event.target.result;
-                        const { ciphertext, iv } = await encryptMessage(sharedSecret, fileBuffer);
-
-                        const chunkMessage = {
-                            type: 'file_chunk',
-                            fileId: fileId,
-                            chunkIndex: chunkIndex,
-                            content: Array.from(new Uint8Array(ciphertext)),
-                            iv: Array.from(iv)
-                        };
-
-                        // IMPORTANT: Wait for the buffer to clear before sending the next chunk
-                        // to avoid overwhelming the receiver.
-                        if (dataChannelRef.current.bufferedAmount > dataChannelRef.current.bufferedAmountLowThreshold) {
-                           await new Promise(res => {
-                               dataChannelRef.current.onbufferedamountlow = () => res();
-                           });
-                        }
-
-                        dataChannelRef.current.send(JSON.stringify(chunkMessage));
-                        
-                        // Clean up memory
-                        zeroFill(fileBuffer);
-                        zeroFill(new Uint8Array(ciphertext).buffer);
-                        zeroFill(iv.buffer);
-
-                        resolve();
-                    } catch (error) {
-                        reject(error);
-                    }
-                };
-                
-                reader.onerror = (err) => reject(err);
-                reader.readAsArrayBuffer(slice);
-            });
-            
-            offset += CHUNK_SIZE;
-            setStatusMessage(`Sending file... ${Math.round((offset / fileToShare.size) * 100)}%`);
+        if (!fileToShare || !sharedSecret) {
+            setStatusMessage('No file selected or secure session not established.');
+            return;
         }
+        if (!dataChannelRef.current || dataChannelRef.current.readyState !== 'open') {
+            setStatusMessage('WebRTC data channel not open. Please wait for peer connection.');
+            return;
+        }
+        
+        setStatusMessage('Preparing to send file...');
+        setTransferringFile(true);
 
-        console.log(`✅ All ${totalChunks} chunks for ${fileId} have been sent.`);
-        setStatusMessage('File sent successfully!');
-        setFileToShare(null); // Clear selection
+        const CHUNK_SIZE = 64 * 1024; // 64 KB chunks
+        const fileId = `file_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const totalChunks = Math.ceil(fileToShare.size / CHUNK_SIZE);
+        
+        console.log(`Preparing to send ${fileToShare.name} (${fileToShare.size} bytes) in ${totalChunks} chunks.`);
 
-    } catch (error) {
-        console.error('❌ Error sending file chunks:', error);
-        setStatusMessage('Failed to send file: ' + error.message);
-    } finally {
-        setTransferringFile(false);
-    }
-};
+        try {
+            // Step 1: Send metadata message first
+            const metadataMessage = {
+                type: 'file_meta',
+                fileId: fileId,
+                totalChunks: totalChunks,
+                fileMetadata: {
+                    name: fileToShare.name,
+                    mimeType: fileToShare.type,
+                    size: fileToShare.size,
+                    duration: viewDuration
+                }
+            };
+            dataChannelRef.current.send(JSON.stringify(metadataMessage));
+            console.log("Sent file metadata:", metadataMessage);
 
+            // Step 2: Read and send each chunk
+            let offset = 0;
+            for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+                // Use a promise to handle FileReader's async nature within the loop
+                await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    const slice = fileToShare.slice(offset, offset + CHUNK_SIZE);
+                    
+                    reader.onload = async (event) => {
+                        try {
+                            const fileBuffer = event.target.result;
+                            const { ciphertext, iv } = await encryptMessage(sharedSecret, fileBuffer);
+
+                            const chunkMessage = {
+                                type: 'file_chunk',
+                                fileId: fileId,
+                                chunkIndex: chunkIndex,
+                                content: Array.from(new Uint8Array(ciphertext)),
+                                iv: Array.from(iv)
+                            };
+
+                            // IMPORTANT: Wait for the buffer to clear before sending the next chunk
+                            // to avoid overwhelming the receiver.
+                            if (dataChannelRef.current.bufferedAmount > dataChannelRef.current.bufferedAmountLowThreshold) {
+                            await new Promise(res => {
+                                dataChannelRef.current.onbufferedamountlow = () => res();
+                            });
+                            }
+
+                            dataChannelRef.current.send(JSON.stringify(chunkMessage));
+                            
+                            // Clean up memory
+                            zeroFill(fileBuffer);
+                            zeroFill(new Uint8Array(ciphertext).buffer);
+                            zeroFill(iv.buffer);
+
+                            resolve();
+                        } catch (error) {
+                            reject(error);
+                        }
+                    };
+                    
+                    reader.onerror = (err) => reject(err);
+                    reader.readAsArrayBuffer(slice);
+                });
+                
+                offset += CHUNK_SIZE;
+                setStatusMessage(`Sending file... ${Math.round((offset / fileToShare.size) * 100)}%`);
+            }
+
+            console.log(`✅ All ${totalChunks} chunks for ${fileId} have been sent.`);
+            setStatusMessage('File sent successfully!');
+            setFileToShare(null); // Clear selection
+
+        } catch (error) {
+            console.error('❌ Error sending file chunks:', error);
+            setStatusMessage('Failed to send file: ' + error.message);
+        } finally {
+            setTransferringFile(false);
+        }
+    };
+
+    const handleVerificationSuccess = () => {
+        setIsVerified(true);
+        setStatusMessage('Connection verified! Chat enabled.');
+    };
+
+    const handleVerificationFail = () => {
+        // This is a critical failure. Terminate the connection completely.
+        if (ws) {
+            ws.close();
+        }
+        if (peerConnectionRef.current) {
+            peerConnectionRef.current.close();
+        }
+        // Reset all sensitive state
+        setSharedSecret(null);
+        sharedSecretRef.current = null;
+        setPeerPublicKey(null);
+        setAuthenticationString('');
+        setIsVerified(false);
+        setChatMessages([]);
+        setPeerConnectionCode('');
+        peerConnectionCodeRef.current = '';
+        setConnectionStatus('Verification Failed - Connection Terminated');
+        setStatusMessage('The security codes did not match. The connection has been closed to protect your privacy. Please refresh and try again.');
+    };
 
     return (
         <div className="App">
@@ -839,82 +879,109 @@ function App() {
                 )}
 
                 {sharedSecret && (
-                    <div className="chat-section">
-                        <h2>Secure Chat</h2>
-                        <div className="message-list" style={{ overflowY: 'auto', maxHeight: '300px', border: '1px solid #61dafb', padding: '10px', borderRadius: '5px', marginBottom: '10px' }}>
-                            {chatMessages.map((msg, index) => (
-                                <p key={index} className={msg.sender === 'me' ? 'my-message' : 'peer-message'}>
-                                    <strong>{msg.sender === 'me' ? 'You:' : 'Peer:'}</strong> {msg.content}
-                                    {msg.relayed && <span title="Sent via server relay"> ☁️</span>}
-                                </p>
-                            ))}
-                        </div>
-                        <div className="message-input">
-                            <input
-                                type="text"
-                                value={messageInput}
-                                onChange={e => setMessageInput(e.target.value)}
-                                onKeyPress={e => { if (e.key === 'Enter') sendTextMessage(); }}
-                                placeholder="Type your ephemeral message..."
-                            />
-                            <button
-                                onClick={sendTextMessage}
-                                disabled={
-                                    !sharedSecret ||
-                                    // Disable only if BOTH the WebRTC channel AND the WebSocket are not open.
-                                    (dataChannelRef.current?.readyState !== 'open' && ws?.readyState !== WebSocket.OPEN)
-                                }
-                            >
-                                Send Message
-                            </button>
+    <>
+        {!isVerified ? (
+            // --- VERIFICATION UI ---
+            <div className="connection-section">
+                <h2>Verify Your Connection</h2>
+                <p>To ensure your connection is secure and not intercepted, verbally confirm with your peer that you both see the same two words below.</p>
+                <div style={{ margin: '20px 0', padding: '15px', border: '2px solid #61dafb', borderRadius: '8px', backgroundColor: '#3e4450' }}>
+                    <h3 style={{ margin: 0, fontSize: '2rem', letterSpacing: '2px' }}>
+                        {authenticationString}
+                    </h3>
+                </div>
+                <p>Do the words match?</p>
+                <div>
+                    <button onClick={handleVerificationSuccess} style={{ backgroundColor: '#4CAF50', color: 'white' }}>
+                        Yes, We Match
+                    </button>
+                    <button onClick={handleVerificationFail} style={{ backgroundColor: '#f44336', color: 'white' }}>
+                        No, It's Different
+                    </button>
+                </div>
+            </div>
+        ) : (
+            // --- SECURE CHAT & FILE UI (The old block) ---
+            <div className="chat-section">
+                <h2>Secure Chat (Verified)</h2>
+                {/* (The rest of your chat and file sharing JSX goes here) */}
+                {/* Just copy your existing <div className="message-list">...</div>, 
+                    <div className="message-input">...</div>, and
+                    <div className="file-sharing">...</div> blocks into this space. 
+                */}
+                <div className="message-list" style={{ overflowY: 'auto', maxHeight: '300px', border: '1px solid #61dafb', padding: '10px', borderRadius: '5px', marginBottom: '10px' }}>
+                    {chatMessages.map((msg, index) => {
+                        console.log("💬 Rendering message:", msg);
+                        return (
+                            <p key={index} className={msg.sender === 'me' ? 'my-message' : 'peer-message'}>
+                                <strong>{msg.sender === 'me' ? 'You:' : 'Peer:'}</strong> {msg.content}
+                                {msg.relayed && <span title="Message sent via server relay (not P2P)"> ☁️</span>}
+                            </p>
+                        );
+                    })}
+                </div>
+                <div className="message-input">
+                    <input
+                        type="text"
+                        value={messageInput}
+                        onChange={e => setMessageInput(e.target.value)}
+                        onKeyPress={e => { if (e.key === 'Enter') sendTextMessage(); }}
+                        placeholder="Type your ephemeral message..."
+                    />
+                    <button
+                        onClick={sendTextMessage}
+                        disabled={
+                            !sharedSecret ||
+                            (dataChannelRef.current?.readyState !== 'open' && ws?.readyState !== WebSocket.OPEN)
+                        }
+                        >
+                        Send Message
+                    </button>
 
-                        </div>
+                </div>
 
-                        <div className="file-sharing" style={{ marginTop: '20px', borderTop: '1px solid #61dafb', paddingTop: '20px' }}>
-                            <h3>Ephemeral File Share</h3>
-                            <input type="file" onChange={handleFileChange} />
-                            <select value={viewDuration} onChange={(e) => setViewDuration(parseInt(e.target.value))}>
-                                <option value={5}>5 seconds</option>
-                                <option value={10}>10 seconds</option>
-                                <option value={30}>30 seconds</option>
-                                <option value={60}>1 minute</option>
-                                <option value={300}>5 minutes</option>
-                            </select>
-                            <button
-                            onClick={() => {
-                                console.log("📤 [SendFileButton] Clicked");
-                                console.log("📦 File to send:", fileToShare?.name, fileToShare?.size);
-                                console.log("📡 DataChannel state:", dataChannelRef.current?.readyState);
-                                sendFile();
-                            }}
-                            disabled={
-                                !fileToShare ||
-                                !dataChannelRef.current ||
-                                dataChannelRef.current.readyState !== 'open' ||
-                                transferringFile
-                            }
-                            >
+                <div className="file-sharing" style={{ marginTop: '20px', borderTop: '1px solid #61dafb', paddingTop: '20px' }}>
+                    <h3>Ephemeral File Share</h3>
+                    <input type="file" onChange={handleFileChange} />
+                    <select value={viewDuration} onChange={(e) => setViewDuration(parseInt(e.target.value))}>
+                        <option value={5}>5 seconds</option>
+                        <option value={10}>10 seconds</option>
+                        <option value={30}>30 seconds</option>
+                        <option value={60}>1 minute</option>
+                        <option value={300}>5 minutes</option>
+                    </select>
+                    <button
+                    onClick={sendFile}
+                    disabled={
+                        !fileToShare ||
+                        !dataChannelRef.current ||
+                        dataChannelRef.current.readyState !== 'open' ||
+                        transferringFile
+                    }
+                    >
 
-                                {transferringFile ? 'Sending...' : 'Send File (View Once)'}
-                            </button>
-                            {fileToShare && <p>Selected: {fileToShare.name} ({fileToShare.size} bytes)</p>}
+                        {transferringFile ? 'Sending...' : 'Send File (View Once)'}
+                    </button>
+                    {fileToShare && <p>Selected: {fileToShare.name} ({fileToShare.size} bytes)</p>}
 
-                            {currentFileDisplay && (
-                                <div className="file-display" style={{ marginTop: '20px', border: '2px solid red', padding: '10px' }}>
-                                    <p>Ephemeral File (Viewing for {currentFileDisplay.duration}s)</p>
-                                    {currentFileDisplay.type.startsWith('image/') && (
-                                        <img src={currentFileDisplay.url} alt={currentFileDisplay.name} style={{ maxWidth: '100%', maxHeight: '400px' }} />
-                                    )}
-                                    {currentFileDisplay.type.startsWith('video/') && (
-                                        <video src={currentFileDisplay.url} controls autoPlay style={{ maxWidth: '100%', maxHeight: '400px' }} onEnded={clearFileDisplay}></video>
-                                    )}
-                                    <button onClick={clearFileDisplay}>Clear Now</button>
-                                </div>
+                    {currentFileDisplay && (
+                        <div className="file-display" style={{ marginTop: '20px', border: '2px solid red', padding: '10px' }}>
+                            <p>Ephemeral File (Viewing for {currentFileDisplay.duration}s)</p>
+                            {currentFileDisplay.type.startsWith('image/') && (
+                                <img src={currentFileDisplay.url} alt={currentFileDisplay.name} style={{ maxWidth: '100%', maxHeight: '400px' }} />
                             )}
-                            {transferringFile && !currentFileDisplay && <p>Processing file transfer...</p>}
+                            {currentFileDisplay.type.startsWith('video/') && (
+                                <video src={currentFileDisplay.url} controls autoPlay style={{ maxWidth: '100%', maxHeight: '400px' }} onEnded={clearFileDisplay}></video>
+                            )}
+                            <button onClick={clearFileDisplay}>Clear Now</button>
                         </div>
-                    </div>
-                )}
+                    )}
+                    {transferringFile && !currentFileDisplay && <p>Processing file transfer...</p>}
+                </div>
+            </div>
+        )}
+    </>
+)}
             </header>
         </div>
     );

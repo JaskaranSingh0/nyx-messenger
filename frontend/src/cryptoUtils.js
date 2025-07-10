@@ -167,3 +167,38 @@ export function zeroFill(buffer) {
     // Memory is not actually freed (JS garbage collection),
     // but this prevents recovery in memory snapshots.
 }
+
+
+
+// Add this new code to the end of frontend/src/cryptoUtils.js
+
+const SAS_ADJECTIVES = [
+    'Brave', 'Calm', 'Eager', 'Fancy', 'Gentle', 'Happy', 'Jolly', 'Kind', 'Lively', 'Merry',
+    'Nice', 'Proud', 'Silly', 'Witty', 'Zany', 'Ancient', 'Swift', 'Quiet', 'Bright', 'Dark'
+];
+const SAS_NOUNS = [
+    'Apple', 'Bubble', 'Castle', 'Dragon', 'Eagle', 'Forest', 'Glove', 'Harbor', 'Island', 'Jungle',
+    'Kitten', 'Lemon', 'Mountain', 'Noodle', 'Ocean', 'Planet', 'River', 'Star', 'Tiger', 'Unicorn'
+];
+
+/**
+ * Generates a Short Authentication String (SAS) from a shared secret.
+ * This is used to verify the connection is not being intercepted (MitM).
+ * @param {ArrayBuffer} sharedSecret The raw shared secret.
+ * @returns {Promise<string>} A two-word string like "Brave-Tiger".
+ */
+export async function generateShortAuthString(sharedSecret) {
+    // Hash the shared secret to create a unique, fixed-length fingerprint.
+    const hashBuffer = await window.crypto.subtle.digest('SHA-256', sharedSecret);
+    const hashArray = new Uint8Array(hashBuffer);
+
+    // Use the first two bytes of the hash to pick words from our lists.
+    // The modulo operator ensures we always get a valid index.
+    const word1Index = hashArray[0] % SAS_ADJECTIVES.length;
+    const word2Index = hashArray[1] % SAS_NOUNS.length;
+
+    const word1 = SAS_ADJECTIVES[word1Index];
+    const word2 = SAS_NOUNS[word2Index];
+
+    return `${word1}-${word2}`;
+}
