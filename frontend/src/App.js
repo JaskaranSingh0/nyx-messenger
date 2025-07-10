@@ -452,7 +452,8 @@ function App() {
                 case 'webrtc_offer':
                     // Mark self as receiver and call setup before applying SDP
                     await setupWebRTC(socket, true, currentMyCode, data.fromCode);
-                    handleWebRTCSignaling(data, currentMyCode, data.fromCode, peerConnectionRef, socket);
+                    // FIX: Add 'await' to ensure the answer is created and sent before moving on.
+                    await handleWebRTCSignaling(data, currentMyCode, data.fromCode, peerConnectionRef, socket);
                     break;
 
                 case 'webrtc_answer':
@@ -774,11 +775,11 @@ function App() {
                             <button
                                 onClick={sendTextMessage}
                                 disabled={
-                                    !sharedSecret ||                     // 🔐 shared secret must be derived
-                                    !dataChannelRef.current || 
-                                    dataChannelRef.current.readyState !== 'open'
+                                    !sharedSecret ||
+                                    // Disable only if BOTH the WebRTC channel AND the WebSocket are not open.
+                                    (dataChannelRef.current?.readyState !== 'open' && ws?.readyState !== WebSocket.OPEN)
                                 }
-                                >
+                            >
                                 Send Message
                             </button>
 
