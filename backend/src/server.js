@@ -74,6 +74,12 @@ wss.on('connection', ws => {
                     }
                     break;
 
+                //Ping/Pong Intervals
+                case 'ping':
+                    // Don't log pings, they are just noise
+                    ws.send(JSON.stringify({ type: 'pong' }));
+                    break;
+
                 default:
                     console.warn(`Unhandled message type: ${data.type} from ${ws.code || ws.id}`);
                     ws.send(JSON.stringify({ type: 'error', message: `Unknown message type: ${data.type}` }));

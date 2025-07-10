@@ -559,6 +559,19 @@ function App() {
         }
     }, [sharedSecret]);
 
+    //Ping/Pong Intervals
+    useEffect(() => {
+        if (!ws) return;
+    
+        const interval = setInterval(() => {
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'ping' }));
+            }
+        }, 30000); // 30 seconds
+    
+        return () => clearInterval(interval);
+    }, [ws]);
+
 
     // --- Connection Code / QR Code Generation & Handling ---
 
@@ -666,7 +679,12 @@ function App() {
                     toCode: peerConnectionCodeRef.current, // Use the code of the peer we successfully connected to
                     message: messageData
                 }));
-                 setChatMessages(prev => [...prev, { sender: 'me', content: messageInput + ' (sent via server relay)', type: 'text' }]);
+                setChatMessages(prev => [...prev, { 
+                    sender: 'me', 
+                    content: messageInput + ' (sent via server relay)', 
+                    type: 'text',
+                    relayed: true // <-- The new flag
+                }]);
             } else {
                 setStatusMessage('No active connection to send message.');
                 return;
@@ -824,14 +842,12 @@ function App() {
                     <div className="chat-section">
                         <h2>Secure Chat</h2>
                         <div className="message-list" style={{ overflowY: 'auto', maxHeight: '300px', border: '1px solid #61dafb', padding: '10px', borderRadius: '5px', marginBottom: '10px' }}>
-                            {chatMessages.map((msg, index) => {
-                                console.log("💬 Rendering message:", msg);
-                                return (
-                                    <p key={index} className={msg.sender === 'me' ? 'my-message' : 'peer-message'}>
-                                        <strong>{msg.sender === 'me' ? 'You:' : 'Peer:'}</strong> {msg.content}
-                                    </p>
-                                );
-                            })}
+                            {chatMessages.map((msg, index) => (
+                                <p key={index} className={msg.sender === 'me' ? 'my-message' : 'peer-message'}>
+                                    <strong>{msg.sender === 'me' ? 'You:' : 'Peer:'}</strong> {msg.content}
+                                    {msg.relayed && <span title="Sent via server relay"> ☁️</span>}
+                                </p>
+                            ))}
                         </div>
                         <div className="message-input">
                             <input
