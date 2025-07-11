@@ -43,6 +43,7 @@ function App() {
 
     // This prevents us from sending too many messages
     const typingTimeoutRef = useRef(null);
+    const messageListRef = useRef(null);
 
     // new state variables for SAS
     const [authenticationString, setAuthenticationString] = useState('');
@@ -607,6 +608,19 @@ function App() {
     }, [ws]);
 
 
+    //Chatbox Auto Scrolling
+    useEffect(() => {
+    // This effect runs whenever a new message is added to the chat
+    if (messageListRef.current) {
+        // The 'current' property of the ref points to the DOM element
+        const messageList = messageListRef.current;
+        
+        // We set its scrollTop to its scrollHeight, which scrolls it to the bottom
+        messageList.scrollTop = messageList.scrollHeight;
+    }
+}, [chatMessages]); // The dependency array ensures this runs only when chatMessages changes
+
+
     // --- Connection Code / QR Code Generation & Handling ---
 
     const generateMyCodeAndSend = async () => {
@@ -979,12 +993,9 @@ function App() {
             // --- SECURE CHAT & FILE UI (The old block) ---
             <div className="chat-section">
                 <h2>Secure Chat (Verified)</h2>
-                {/* (The rest of your chat and file sharing JSX goes here) */}
-                {/* Just copy your existing <div className="message-list">...</div>, 
-                    <div className="message-input">...</div>, and
-                    <div className="file-sharing">...</div> blocks into this space. 
-                */}
-                <div className="message-list" style={{ overflowY: 'auto', maxHeight: '300px', border: '1px solid #61dafb', padding: '10px', borderRadius: '5px', marginBottom: '10px' }}>
+                
+                <div ref={messageListRef} 
+                className="message-list" style={{ overflowY: 'auto', maxHeight: '300px', border: '1px solid #61dafb', padding: '10px', borderRadius: '5px', marginBottom: '10px' }}>
                     {chatMessages.map((msg, index) => {
                         console.log("💬 Rendering message:", msg);
                         return (
