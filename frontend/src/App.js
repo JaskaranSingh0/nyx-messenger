@@ -50,6 +50,8 @@ function App() {
 
     //track if the peer is typing
     const [isPeerTyping, setIsPeerTyping] = useState(false);
+    
+    const [copySuccess, setCopySuccess] = useState('')
 
     //const [incomingFileChunks, setIncomingFileChunks] = useState(new Map());
     const incomingFileChunksRef = useRef(new Map());
@@ -94,7 +96,12 @@ function App() {
             const decryptedBuffer = await decryptMessage(secret, ciphertext, ivArr);
             const decryptedText = new TextDecoder().decode(decryptedBuffer);
 
-            setChatMessages(prev => [...prev, { sender: 'peer', content: decryptedText, type: 'text' }]);
+            setChatMessages(prev => [...prev, { 
+                sender: 'peer',
+                content: decryptedText, 
+                type: 'text',
+                timestamp: new Date()            
+            }]);
 
             zeroFill(ciphertext);
             zeroFill(ivArr.buffer);
@@ -733,19 +740,28 @@ function App() {
 
             if (dataChannelRef.current && dataChannelRef.current.readyState === 'open') {
                 dataChannelRef.current.send(JSON.stringify(messageData));
-                setChatMessages(prev => [...prev, { sender: 'me', content: messageInput, type: 'text' }]);
+                // Add message to chat with timestamp
+                setChatMessages(prev => [...prev, {
+                    sender: 'me',
+                    content: messageInput,
+                    type: 'text',
+                    relayed: false, // Sent P2P, not relayed
+                    timestamp: new Date()
+                }]);
             } else if (ws && ws.readyState === WebSocket.OPEN) {
-                // Fallback to signaling server if WebRTC not open (E2EE still protects content)
+                // Fallback to signaling server
                 ws.send(JSON.stringify({
                     type: 'encrypted_message',
-                    toCode: peerConnectionCodeRef.current, // Use the code of the peer we successfully connected to
+                    toCode: peerConnectionCodeRef.current,
                     message: messageData
                 }));
-                setChatMessages(prev => [...prev, { 
-                    sender: 'me', 
-                    content: messageInput, 
+                // Add message to chat with timestamp AND relayed flag
+                setChatMessages(prev => [...prev, {
+                    sender: 'me',
+                    content: messageInput,
                     type: 'text',
-                    relayed: true // <-- The new flag
+                    relayed: true, // Sent via server, was relayed
+                    timestamp: new Date()
                 }]);
             } else {
                 setStatusMessage('No active connection to send message.');
@@ -908,9 +924,21 @@ function App() {
 
                         {myConnectionCode && (
                             <div style={{ marginTop: '20px' }}>
-                                <p>Your Code: <code>{myConnectionCode}</code></p>
-                                {qrValue && <QRCodeSVG value={qrValue} size={128} level="H" />}
-                                <p>Share this code (physically or securely) with your peer.</p>
+                                <div>
+                                    Your Code: <code>{myConnectionCode}</code>
+                                    <button
+                                        onClick={() => {
+                                            navigator.clipboard.writeText(myConnectionCode);
+                                            setCopySuccess('Copied!');
+                                            setTimeout(() => setCopySuccess(''), 2000); // Reset after 2 seconds
+                                        }}
+                                        style={{ marginLeft: '10px' }}
+                                    >
+                                        {copySuccess || 'Copy'}
+                                    </button>
+                                </div>
+                                {qrValue && <div style={{marginTop: '10px'}}><QRCodeSVG value={qrValue} size={128} level="H" /></div>}
+                                <p>Share this code or QR with your peer.</p>
                             </div>
                         )}
                         <div style={{ marginTop: '20px' }}>
@@ -961,7 +989,15 @@ function App() {
                         console.log("💬 Rendering message:", msg);
                         return (
                             <p key={index} className={msg.sender === 'me' ? 'my-message' : 'peer-message'}>
-                                <strong>{msg.sender === 'me' ? 'You:' : 'Peer:'}</strong> {msg.content}
+                                <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <span>
+                                        <strong>{msg.sender === 'me' ? 'You:' : 'Peer:'}</strong> {msg.content}
+                                        {msg.relayed && <span title="Message sent via server relay (not P2P)"> ☁️</span>}
+                                    </span>
+                                    <span style={{ fontSize: '0.7em', color: '#999', paddingLeft: '15px' }}>
+                                        {msg.timestamp && msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    </span>
+                                </span>
                                 {msg.relayed && <span title="Message sent via server relay (not P2P)"> ☁️</span>}
                             </p>
                         );
