@@ -13,6 +13,7 @@ import {
     zeroFill
 } from './cryptoUtils';
 import './App.css';
+import QrScanner from './QrScanner';
 
 function App() {
     // ===================================================================
@@ -42,6 +43,10 @@ function App() {
     const [currentFileDisplay, setCurrentFileDisplay] = useState(null);
     const fileTimerRef = useRef(null);
     const [transferringFile, setTransferringFile] = useState(false);
+
+
+    // qr scanner state
+    const [isScannerOpen, setIsScannerOpen] = useState(false);
 
     // This prevents us from sending too many messages
     const typingTimeoutRef = useRef(null);
@@ -713,8 +718,10 @@ function App() {
         }, 60 * 1000); // 60 seconds validity
     };
 
-    const connectToPeer = async (e) => {
+    const connectToPeer = async (e, codeFromScanner = null) => {
         if (e && e.preventDefault) e.preventDefault();
+
+        const peerCode = codeFromScanner || inputConnectionCode; // Use scanner code if available
 
         try {
             console.log("🔹 connectToPeer triggered");
@@ -723,8 +730,8 @@ function App() {
                 setStatusMessage('Not connected to signaling server.');
                 return;
             }
-            if (!inputConnectionCode) {
-                setStatusMessage('Please enter a peer code.');
+            if (!peerCode) { // Check the combined peerCode variable
+                setStatusMessage('Please enter or scan a peer code.');
                 return;
             }
             if (!sessionKeyPair) {
@@ -732,9 +739,9 @@ function App() {
                 return;
             }
 
-            setPeerConnectionCode(inputConnectionCode);
-            peerConnectionCodeRef.current = inputConnectionCode;
-            console.log(`[connectToPeer] Setting peerConnectionCode to: ${inputConnectionCode}`);
+            setPeerConnectionCode(peerCode);
+            peerConnectionCodeRef.current = peerCode;
+            console.log(`[connectToPeer] Setting peerConnectionCode to: ${peerCode}`);
             console.log(`[connectToPeer] myConnectionCode is: ${myConnectionCode}`);
 
             const ourPublicKeyJwk = await exportPublicKey(sessionKeyPair.publicKey);
@@ -742,15 +749,42 @@ function App() {
 
             ws.send(JSON.stringify({
                 type: 'session_offer',
-                toCode: inputConnectionCode,
+                toCode: peerCode, // Use peerCode here
                 fromCode: myConnectionCodeRef.current,
                 publicKeyJwk: ourPublicKeyJwk
             }));
             console.log(`[connectToPeer] Sent session_offer`);
 
-            setStatusMessage(`Sending connection offer to peer with code: ${inputConnectionCode}`);
+            setStatusMessage(`Sending connection offer to peer with code: ${peerCode}`);
         } catch (err) {
             console.error("❌ connectToPeer error:", err);
+        }
+    };
+
+    const handleScanSuccess = (decodedText) => {
+        console.log(`Scanned QR successfully: ${decodedText}`);
+        setIsScannerOpen(false); // Close the scanner immediately
+
+        try {
+            const qrData = JSON.parse(decodedText);
+            if (qrData.code) {
+                // We found a code! Set it in the input and connect.
+                setInputConnectionCode(qrData.code);
+                // We need to call connectToPeer in a way that uses the new state.
+                // A short timeout ensures the state has updated before connecting.
+                setTimeout(() => {
+                    // We need to get the peer code from a ref here because `connectToPeer`
+                    // might be called before the state update re-renders the component.
+                    // Let's ensure connectToPeer uses the value directly.
+                    connectToPeer(null, qrData.code);
+                }, 50);
+
+            } else {
+                setStatusMessage('Scanned QR code is invalid (missing code).');
+            }
+        } catch (error) {
+            console.error("Failed to parse QR code data", error);
+            setStatusMessage('Failed to read QR code. Is it a valid NYX code?');
         }
     };
 
@@ -1033,6 +1067,10 @@ function App() {
                                 placeholder="Enter peer's code to connect"
                             />
                             <button type="button" onClick={connectToPeer}>Connect to Peer</button>
+                            {/* --- ADD THE SCANNER BUTTON --- */}
+                            <button type="button" onClick={() => setIsScannerOpen(true)} style={{ marginLeft: '5px' }}>
+                                Scan QR
+                            </button>
                         </div>
                     </div>
                 )}
@@ -1154,6 +1192,14 @@ function App() {
                             </div>
                         )}
                     </>
+                )}
+                {/* QR Scanner Component */}
+                
+                {isScannerOpen && (
+                    <QrScanner 
+                        onScanSuccess={handleScanSuccess} 
+                        onClose={() => setIsScannerOpen(false)} 
+                    />
                 )}
             </header>
         </div>
