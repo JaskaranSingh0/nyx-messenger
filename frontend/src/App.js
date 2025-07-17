@@ -15,6 +15,9 @@ import {
 import './App.css';
 
 function App() {
+    // ===================================================================
+    // 1. All useState and useRef hooks FIRST
+    // ===================================================================
     const [ws, setWs] = useState(null);
     const wsRef = useRef(null);
     const [connectionStatus, setConnectionStatus] = useState('Disconnected');
@@ -33,7 +36,6 @@ function App() {
     const [qrValue, setQrValue] = useState('');
     const [inputConnectionCode, setInputConnectionCode] = useState('');
     
-
     // File sharing state
     const [fileToShare, setFileToShare] = useState(null);
     const [viewDuration, setViewDuration] = useState(5);
@@ -44,6 +46,7 @@ function App() {
     // This prevents us from sending too many messages
     const typingTimeoutRef = useRef(null);
     const messageListRef = useRef(null);
+    const pongTimeoutRef = useRef(null);
 
     // new state variables for SAS
     const [authenticationString, setAuthenticationString] = useState('');
@@ -60,12 +63,14 @@ function App() {
     //message queue
     const [queuedEncryptedMessages, setQueuedEncryptedMessages] = useState([]);
 
-
     // WebRTC refs
     const peerConnectionRef = useRef(null);
     const dataChannelRef = useRef(null);
     const iceCandidatesQueueRef = useRef([]);
 
+    // ===================================================================
+    // 2. All useCallback hooks SECOND
+    // ===================================================================
     // Callback to clear file display
     const clearFileDisplay = useCallback(() => {
         if (currentFileDisplay && currentFileDisplay.url) {
@@ -112,11 +117,9 @@ function App() {
         }
     }, []); // No dependencies needed anymore
 
-
     const decryptAndDisplayMessage = useCallback(async (message, secret) => {
         await handleReceivedMessage(message, secret);
     }, [handleReceivedMessage]);
-
 
     // Callback to bind data channel events
     const bindDataChannelEvents = useCallback((dataChannel) => {
@@ -126,99 +129,97 @@ function App() {
             setStatusMessage('You are now directly connected peer-to-peer! Messaging is direct.');
         };
        
-        
+        dataChannel.onmessage = async (event) => {
+            try {
+                const parsedData = JSON.parse(event.data);
+                const secret = sharedSecretRef.current;
 
-    dataChannel.onmessage = async (event) => {
-        try {
-            const parsedData = JSON.parse(event.data);
-            const secret = sharedSecretRef.current;
+                if (!secret) {
+                    console.warn("❌ No shared secret yet, queuing...");
+                    setQueuedEncryptedMessages(prev => [...prev, parsedData]);
+                    return;
+                }
 
-            if (!secret) {
-                console.warn("❌ No shared secret yet, queuing...");
-                setQueuedEncryptedMessages(prev => [...prev, parsedData]);
-                return;
-            }
+                switch (parsedData.type) {
+                    case 'text':
+                        console.log("📩 Received text message via data channel");
+                        await handleReceivedMessage(parsedData, secret);
+                        break;
 
-            switch (parsedData.type) {
-                case 'text':
-                    console.log("📩 Received text message via data channel");
-                    await handleReceivedMessage(parsedData, secret);
-                    break;
+                    case 'file_meta':
+                        console.log(`📂 Received metadata for file: ${parsedData.fileId}`);
+                        // Use the ref directly. This is a synchronous update.
+                        incomingFileChunksRef.current.set(parsedData.fileId, {
+                            metadata: parsedData.fileMetadata,
+                            totalChunks: parsedData.totalChunks,
+                            chunks: []
+                        });
+                        setStatusMessage(`Receiving ephemeral file: ${parsedData.fileMetadata.name}...`);
+                        setTransferringFile(true);
+                        break;
 
-                case 'file_meta':
-                    console.log(`📂 Received metadata for file: ${parsedData.fileId}`);
-                    // Use the ref directly. This is a synchronous update.
-                    incomingFileChunksRef.current.set(parsedData.fileId, {
-                        metadata: parsedData.fileMetadata,
-                        totalChunks: parsedData.totalChunks,
-                        chunks: []
-                    });
-                    setStatusMessage(`Receiving ephemeral file: ${parsedData.fileMetadata.name}...`);
-                    setTransferringFile(true);
-                    break;
-
-                case 'file_chunk':
-                    // Read from the ref to get the most current data.
-                    const transfer = incomingFileChunksRef.current.get(parsedData.fileId);
-                    if (!transfer) {
-                        console.warn(`Received chunk for unknown fileId: ${parsedData.fileId}`);
-                        return;
-                    }
-
-                    transfer.chunks[parsedData.chunkIndex] = parsedData;
-                    const receivedChunks = transfer.chunks.filter(c => c).length;
-                    setStatusMessage(`Receiving file... ${Math.round((receivedChunks / transfer.totalChunks) * 100)}%`);
-
-                    if (receivedChunks === transfer.totalChunks) {
-                        console.log(`✅ All ${transfer.totalChunks} chunks received for ${transfer.metadata.name}. Assembling...`);
-                        
-                        const decryptedChunks = [];
-                        for (let i = 0; i < transfer.totalChunks; i++) {
-                            const chunkData = transfer.chunks[i];
-                            const ciphertext = new Uint8Array(chunkData.content).buffer;
-                            const ivArr = new Uint8Array(chunkData.iv);
-                            const decryptedBuffer = await decryptMessage(secret, ciphertext, ivArr);
-                            decryptedChunks.push(new Blob([decryptedBuffer]));
+                    case 'file_chunk':
+                        // Read from the ref to get the most current data.
+                        const transfer = incomingFileChunksRef.current.get(parsedData.fileId);
+                        if (!transfer) {
+                            console.warn(`Received chunk for unknown fileId: ${parsedData.fileId}`);
+                            return;
                         }
 
-                        const fileBlob = new Blob(decryptedChunks, { type: transfer.metadata.mimeType });
-                        const fileURL = URL.createObjectURL(fileBlob);
+                        transfer.chunks[parsedData.chunkIndex] = parsedData;
+                        const receivedChunks = transfer.chunks.filter(c => c).length;
+                        setStatusMessage(`Receiving file... ${Math.round((receivedChunks / transfer.totalChunks) * 100)}%`);
 
-                        setCurrentFileDisplay({
-                            url: fileURL,
-                            name: transfer.metadata.name,
-                            type: transfer.metadata.mimeType,
-                            size: transfer.metadata.size,
-                            duration: transfer.metadata.duration
-                        });
+                        if (receivedChunks === transfer.totalChunks) {
+                            console.log(`✅ All ${transfer.totalChunks} chunks received for ${transfer.metadata.name}. Assembling...`);
+                            
+                            const decryptedChunks = [];
+                            for (let i = 0; i < transfer.totalChunks; i++) {
+                                const chunkData = transfer.chunks[i];
+                                const ciphertext = new Uint8Array(chunkData.content).buffer;
+                                const ivArr = new Uint8Array(chunkData.iv);
+                                const decryptedBuffer = await decryptMessage(secret, ciphertext, ivArr);
+                                decryptedChunks.push(new Blob([decryptedBuffer]));
+                            }
 
-                        if (fileTimerRef.current) clearTimeout(fileTimerRef.current);
-                        fileTimerRef.current = setTimeout(() => {
-                            clearFileDisplay();
-                            setStatusMessage('Ephemeral file display expired and cleared.');
-                        }, transfer.metadata.duration * 1000);
-                        
-                        // Clean up the completed transfer from the ref
-                        incomingFileChunksRef.current.delete(parsedData.fileId);
-                        setTransferringFile(false);
-                    }
-                    break;
+                            const fileBlob = new Blob(decryptedChunks, { type: transfer.metadata.mimeType });
+                            const fileURL = URL.createObjectURL(fileBlob);
 
-                case 'typing_start':
-                    setIsPeerTyping(true);
-                    break;
+                            setCurrentFileDisplay({
+                                url: fileURL,
+                                name: transfer.metadata.name,
+                                type: transfer.metadata.mimeType,
+                                size: transfer.metadata.size,
+                                duration: transfer.metadata.duration
+                            });
 
-                case 'typing_stop':
-                    setIsPeerTyping(false);
-                    break;
+                            if (fileTimerRef.current) clearTimeout(fileTimerRef.current);
+                            fileTimerRef.current = setTimeout(() => {
+                                clearFileDisplay();
+                                setStatusMessage('Ephemeral file display expired and cleared.');
+                            }, transfer.metadata.duration * 1000);
+                            
+                            // Clean up the completed transfer from the ref
+                            incomingFileChunksRef.current.delete(parsedData.fileId);
+                            setTransferringFile(false);
+                        }
+                        break;
 
-                default:
-                    console.warn(`Unknown message type received on data channel: ${parsedData.type}`);
+                    case 'typing_start':
+                        setIsPeerTyping(true);
+                        break;
+
+                    case 'typing_stop':
+                        setIsPeerTyping(false);
+                        break;
+                    
+                    default:
+                        console.warn(`Unknown message type received on data channel: ${parsedData.type}`);
+                }
+            } catch (e) {
+                console.error('Failed to parse incoming data channel message:', e);
             }
-        } catch (e) {
-            console.error('Failed to parse incoming data channel message:', e);
-        }
-    };
+        };
 
         dataChannel.onclose = () => {
             console.log('WebRTC Data Channel CLOSED!');
@@ -229,7 +230,7 @@ function App() {
             console.error('WebRTC Data Channel ERROR:', error);
             setStatusMessage('WebRTC channel error: ' + error.message);
         };
-    }, [handleReceivedMessage, sharedSecret]);
+    }, [handleReceivedMessage, clearFileDisplay]);
 
     // Callback for handling WebRTC signaling messages
     const handleWebRTCSignaling = useCallback(async (data, myCode, targetPeerCode, currentPeerConnectionRef, currentWs) => {
@@ -344,23 +345,51 @@ function App() {
 
         // --- SDP Exchange (Offer/Answer) ---
         if (!isReceiver) {
-        // Initiator creates and sends the offer
-        if (peerConnection.signalingState !== "stable") {
-            console.warn("⚠️ Cannot create offer now — signaling state:", peerConnection.signalingState);
-            return;
-        }
-        const offer = await peerConnection.createOffer();
-        await peerConnection.setLocalDescription(offer);
-        console.log('Sending WebRTC offer:', offer);
-        socket.send(JSON.stringify({
-            type: 'webrtc_offer',
-            sdp: offer,
-            toCode: targetPeerCode,
-            fromCode: myCode
-        }));
-    }   
+            // Initiator creates and sends the offer
+            if (peerConnection.signalingState !== "stable") {
+                console.warn("⚠️ Cannot create offer now — signaling state:", peerConnection.signalingState);
+                return;
+            }
+            const offer = await peerConnection.createOffer();
+            await peerConnection.setLocalDescription(offer);
+            console.log('Sending WebRTC offer:', offer);
+            socket.send(JSON.stringify({
+                type: 'webrtc_offer',
+                sdp: offer,
+                toCode: targetPeerCode,
+                fromCode: myCode
+            }));
+        }   
     }, [bindDataChannelEvents]); // bindDataChannelEvents is a dependency here
+    
+    // --- THIS IS THE CRITICAL PART: DEFINE resetSession HERE ---
+    const resetSession = useCallback((message) => {
+        if (peerConnectionRef.current) {
+            peerConnectionRef.current.close();
+            peerConnectionRef.current = null;
+        }
+        if (dataChannelRef.current) {
+            dataChannelRef.current.close();
+            dataChannelRef.current = null;
+        }
+        setSharedSecret(null);
+        sharedSecretRef.current = null;
+        setPeerPublicKey(null);
+        setAuthenticationString('');
+        setIsVerified(false);
+        setChatMessages([]);
+        setPeerConnectionCode('');
+        peerConnectionCodeRef.current = '';
+        setCurrentFileDisplay(null);
+        setFileToShare(null);
+        setIsPeerTyping(false);
+        setConnectionStatus('Disconnected');
+        setStatusMessage(message || 'Session terminated. Please refresh to start a new session.');
+    }, []); // Empty dependency array is correct here.
 
+    // ===================================================================
+    // 3. All useEffect hooks THIRD
+    // ===================================================================
     // Handle page unload for debugging
     useEffect(() => {
         const handleBeforeUnload = (e) => {
@@ -434,58 +463,58 @@ function App() {
                     setStatusMessage(`Your ephemeral code is: ${data.code}. Share it with your peer.`);
                     break;
 
-               case 'session_offer':
-                // This is the first step for User B (the receiver)
-                if (!sessionKeyPairRef.current) {
-                    console.error('Session key pair not available in ref for session_offer.');
-                    setStatusMessage('Error: Session key not ready for offer. Please refresh.');
-                    return;
-                }
-                console.log("Received session_offer publicKeyJwk:", data.publicKeyJwk);
-                try {
-                    const peerPk = await importPublicKey(data.publicKeyJwk);
-                    setPeerPublicKey(peerPk);
-
-                    // Derive the shared secret using our private key and their public key
-                    const ss = await deriveSharedSecret(sessionKeyPairRef.current.privateKey, peerPk);
-                    setSharedSecret(ss);
-                    sharedSecretRef.current = ss; // Keep ref in sync
-                    const sas = await generateShortAuthString(ss);
-                    setAuthenticationString(sas);
-
-                    // If any messages were queued while waiting for the secret, decrypt them now
-                    if (queuedEncryptedMessages.length > 0) {
-                        console.log("🔓 Decrypting queued messages...");
-                        queuedEncryptedMessages.forEach(msg => decryptAndDisplayMessage(msg, ss));
-                        setQueuedEncryptedMessages([]);
+                case 'session_offer':
+                    // This is the first step for User B (the receiver)
+                    if (!sessionKeyPairRef.current) {
+                        console.error('Session key pair not available in ref for session_offer.');
+                        setStatusMessage('Error: Session key not ready for offer. Please refresh.');
+                        return;
                     }
+                    console.log("Received session_offer publicKeyJwk:", data.publicKeyJwk);
+                    try {
+                        const peerPk = await importPublicKey(data.publicKeyJwk);
+                        setPeerPublicKey(peerPk);
 
-                    // Store the peer's code so we can send messages back
-                    setPeerConnectionCode(data.fromCode);
-                    peerConnectionCodeRef.current = data.fromCode;
-                    console.log(`[onmessage-session_offer] Setting peerConnectionCode to: ${data.fromCode}`);
+                        // Derive the shared secret using our private key and their public key
+                        const ss = await deriveSharedSecret(sessionKeyPairRef.current.privateKey, peerPk);
+                        setSharedSecret(ss);
+                        sharedSecretRef.current = ss; // Keep ref in sync
+                        const sas = await generateShortAuthString(ss);
+                        setAuthenticationString(sas);
 
-                    // Send our public key back to the initiator in a 'session_answer'
-                    const ourPublicKeyJwk = await exportPublicKey(sessionKeyPairRef.current.publicKey);
-                    socket.send(JSON.stringify({
-                        type: 'session_answer',
-                        toCode: data.fromCode,
-                        fromCode: currentMyCode,
-                        publicKeyJwk: ourPublicKeyJwk
-                    }));
-                    console.log(`[onmessage-session_offer] Sent session_answer with toCode: ${data.fromCode}, fromCode: ${currentMyCode}`);
+                        // If any messages were queued while waiting for the secret, decrypt them now
+                        if (queuedEncryptedMessages.length > 0) {
+                            console.log("🔓 Decrypting queued messages...");
+                            queuedEncryptedMessages.forEach(msg => decryptAndDisplayMessage(msg, ss));
+                            setQueuedEncryptedMessages([]);
+                        }
 
-                    // Update status: We are now secure, waiting for the initiator to start the WebRTC handshake
-                    setStatusMessage('Shared secret derived. Secure session active! Waiting for peer to start direct connection...');
-                    setConnectionStatus('Secure Session Active');
-                    
-                    // THE FIX: We DO NOT call setupWebRTC here. The receiver waits for the 'webrtc_offer'.
+                        // Store the peer's code so we can send messages back
+                        setPeerConnectionCode(data.fromCode);
+                        peerConnectionCodeRef.current = data.fromCode;
+                        console.log(`[onmessage-session_offer] Setting peerConnectionCode to: ${data.fromCode}`);
 
-                } catch (error) {
-                    console.error('Error handling session offer:', error);
-                    setStatusMessage('Failed to establish session: ' + error.message);
-                }
-                break;
+                        // Send our public key back to the initiator in a 'session_answer'
+                        const ourPublicKeyJwk = await exportPublicKey(sessionKeyPairRef.current.publicKey);
+                        socket.send(JSON.stringify({
+                            type: 'session_answer',
+                            toCode: data.fromCode,
+                            fromCode: currentMyCode,
+                            publicKeyJwk: ourPublicKeyJwk
+                        }));
+                        console.log(`[onmessage-session_offer] Sent session_answer with toCode: ${data.fromCode}, fromCode: ${currentMyCode}`);
+
+                        // Update status: We are now secure, waiting for the initiator to start the WebRTC handshake
+                        setStatusMessage('Shared secret derived. Secure session active! Waiting for peer to start direct connection...');
+                        setConnectionStatus('Secure Session Active');
+                        
+                        // THE FIX: We DO NOT call setupWebRTC here. The receiver waits for the 'webrtc_offer'.
+
+                    } catch (error) {
+                        console.error('Error handling session offer:', error);
+                        setStatusMessage('Failed to establish session: ' + error.message);
+                    }
+                    break;
 
                 case 'session_answer':
                     // This is the response for User A after sending an offer
@@ -548,7 +577,17 @@ function App() {
                     }
                     decryptAndDisplayMessage(data.message, secret);
                     break;
+                
+                case 'pong':
+                    // Pong received, so the connection is alive. Clear the timeout.
+                    console.log("Pong received.");
+                    clearTimeout(pongTimeoutRef.current);
+                    break;    
 
+                case 'terminate_session':
+                    console.log('Peer has terminated the session.');
+                    resetSession('Your peer has terminated the session.');
+                    break;
 
                 case 'error':
                     console.error('Server error:', data.message);
@@ -579,9 +618,9 @@ function App() {
                 console.log("Component unmounting — not closing WebSocket (let server timeout).");
             }
         };
-    }, [handleReceivedMessage, setupWebRTC, handleWebRTCSignaling, decryptAndDisplayMessage, sharedSecret]); // Dependencies are now just the memoized callbacks
+    }, [handleReceivedMessage, setupWebRTC, handleWebRTCSignaling, decryptAndDisplayMessage, sharedSecret, resetSession]); // Added resetSession to dependencies
 
-
+    // WebRTC retry useEffect
     useEffect(() => {
         if (
             sharedSecret &&
@@ -592,37 +631,51 @@ function App() {
             console.log("🔁 Retrying WebRTC setup after reload...");
             setupWebRTC(ws, false, myConnectionCodeRef.current, peerConnectionCodeRef.current);
         }
-    }, [sharedSecret]);
+    }, [sharedSecret, setupWebRTC]);
 
     //Ping/Pong Intervals
     useEffect(() => {
         if (!ws) return;
-    
-        const interval = setInterval(() => {
-            if (ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify({ type: 'ping' }));
-            }
-        }, 30000); // 30 seconds
-    
-        return () => clearInterval(interval);
-    }, [ws]);
 
+        const pingInterval = setInterval(() => {
+            if (ws.readyState === WebSocket.OPEN) {
+                console.log("Sending ping...");
+                ws.send(JSON.stringify({ type: 'ping' }));
+
+                // Start a timer. If we don't get a pong back in 5s, the connection is dead.
+                // We clear any previous timer before setting a new one.
+                clearTimeout(pongTimeoutRef.current); 
+                pongTimeoutRef.current = setTimeout(() => {
+                    console.error("Pong timeout! Connection is likely dead.");
+                    // We call resetSession to clean up the UI and state.
+                    resetSession("Connection to server lost (ping timeout). Please refresh.");
+                }, 5000); // 5-second timeout for the pong
+            }
+        }, 30000); // Send a ping every 30 seconds
+
+        // Cleanup function when the component unmounts or ws changes
+        return () => {
+            clearInterval(pingInterval);
+            clearTimeout(pongTimeoutRef.current);
+        };
+    }, [ws, resetSession]); // Dependencies on ws and resetSession
 
     //Chatbox Auto Scrolling
     useEffect(() => {
-    // This effect runs whenever a new message is added to the chat
-    if (messageListRef.current) {
-        // The 'current' property of the ref points to the DOM element
-        const messageList = messageListRef.current;
-        
-        // We set its scrollTop to its scrollHeight, which scrolls it to the bottom
-        messageList.scrollTop = messageList.scrollHeight;
-    }
-}, [chatMessages]); // The dependency array ensures this runs only when chatMessages changes
+        // This effect runs whenever a new message is added to the chat
+        if (messageListRef.current) {
+            // The 'current' property of the ref points to the DOM element
+            const messageList = messageListRef.current;
+            
+            // We set its scrollTop to its scrollHeight, which scrolls it to the bottom
+            messageList.scrollTop = messageList.scrollHeight;
+        }
+    }, [chatMessages]); // The dependency array ensures this runs only when chatMessages changes
 
-
+    // ===================================================================
+    // 4. All other regular functions (handlers, etc.) FOURTH
+    // ===================================================================
     // --- Connection Code / QR Code Generation & Handling ---
-
     const generateMyCodeAndSend = async () => {
         if (!sessionKeyPair) {
             setStatusMessage('Generating keys... please wait.');
@@ -657,48 +710,47 @@ function App() {
     };
 
     const connectToPeer = async (e) => {
-    if (e && e.preventDefault) e.preventDefault();
+        if (e && e.preventDefault) e.preventDefault();
 
-    try {
-        console.log("🔹 connectToPeer triggered");
+        try {
+            console.log("🔹 connectToPeer triggered");
 
-        if (!ws || ws.readyState !== WebSocket.OPEN) {
-            setStatusMessage('Not connected to signaling server.');
-            return;
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                setStatusMessage('Not connected to signaling server.');
+                return;
+            }
+            if (!inputConnectionCode) {
+                setStatusMessage('Please enter a peer code.');
+                return;
+            }
+            if (!sessionKeyPair) {
+                setStatusMessage('Generating keys... please wait.');
+                return;
+            }
+
+            setPeerConnectionCode(inputConnectionCode);
+            peerConnectionCodeRef.current = inputConnectionCode;
+            console.log(`[connectToPeer] Setting peerConnectionCode to: ${inputConnectionCode}`);
+            console.log(`[connectToPeer] myConnectionCode is: ${myConnectionCode}`);
+
+            const ourPublicKeyJwk = await exportPublicKey(sessionKeyPair.publicKey);
+            console.log("Exported JWK (sender):", ourPublicKeyJwk);
+
+            ws.send(JSON.stringify({
+                type: 'session_offer',
+                toCode: inputConnectionCode,
+                fromCode: myConnectionCodeRef.current,
+                publicKeyJwk: ourPublicKeyJwk
+            }));
+            console.log(`[connectToPeer] Sent session_offer`);
+
+            setStatusMessage(`Sending connection offer to peer with code: ${inputConnectionCode}`);
+        } catch (err) {
+            console.error("❌ connectToPeer error:", err);
         }
-        if (!inputConnectionCode) {
-            setStatusMessage('Please enter a peer code.');
-            return;
-        }
-        if (!sessionKeyPair) {
-            setStatusMessage('Generating keys... please wait.');
-            return;
-        }
-
-        setPeerConnectionCode(inputConnectionCode);
-        peerConnectionCodeRef.current = inputConnectionCode;
-        console.log(`[connectToPeer] Setting peerConnectionCode to: ${inputConnectionCode}`);
-        console.log(`[connectToPeer] myConnectionCode is: ${myConnectionCode}`);
-
-        const ourPublicKeyJwk = await exportPublicKey(sessionKeyPair.publicKey);
-        console.log("Exported JWK (sender):", ourPublicKeyJwk);
-
-        ws.send(JSON.stringify({
-            type: 'session_offer',
-            toCode: inputConnectionCode,
-            fromCode: myConnectionCodeRef.current,
-            publicKeyJwk: ourPublicKeyJwk
-        }));
-        console.log(`[connectToPeer] Sent session_offer`);
-
-        setStatusMessage(`Sending connection offer to peer with code: ${inputConnectionCode}`);
-    } catch (err) {
-        console.error("❌ connectToPeer error:", err);
-    }
-};
+    };
 
     // --- Typing Indicator Functions ---
-
     const handleTyping = () => {
         // Don't send typing events if the channel isn't open
         if (!dataChannelRef.current || dataChannelRef.current.readyState !== 'open') {
@@ -722,11 +774,7 @@ function App() {
         }, 2000); // 2 seconds
     };
 
-
-
-
     // --- Messaging Functions ---
-
     const sendTextMessage = async () => {
         if (!sharedSecret) {
             setStatusMessage('Secure session not established. Cannot send messages.');
@@ -790,7 +838,6 @@ function App() {
     };
 
     // --- File Sending Functions ---
-
     const handleFileChange = (e) => {
         const file = e.target.files[0];
         if (file) {
@@ -857,9 +904,9 @@ function App() {
                             // IMPORTANT: Wait for the buffer to clear before sending the next chunk
                             // to avoid overwhelming the receiver.
                             if (dataChannelRef.current.bufferedAmount > dataChannelRef.current.bufferedAmountLowThreshold) {
-                            await new Promise(res => {
-                                dataChannelRef.current.onbufferedamountlow = () => res();
-                            });
+                                await new Promise(res => {
+                                    dataChannelRef.current.onbufferedamountlow = () => res();
+                                });
                             }
 
                             dataChannelRef.current.send(JSON.stringify(chunkMessage));
@@ -921,6 +968,25 @@ function App() {
         setStatusMessage('The security codes did not match. The connection has been closed to protect your privacy. Please refresh and try again.');
     };
 
+    const handleTerminateSession = () => {
+        console.log("Terminating session...");
+    
+        // Send a notification to the peer, if connected
+        if (ws && ws.readyState === WebSocket.OPEN && peerConnectionCodeRef.current) {
+            ws.send(JSON.stringify({
+                type: 'terminate_session',
+                toCode: peerConnectionCodeRef.current,
+                fromCode: myConnectionCodeRef.current
+            }));
+        }
+    
+        // Clean up our own session immediately
+        resetSession('You have terminated the session.');
+    };
+
+    // ===================================================================
+    // 5. The final return statement LAST
+    // ===================================================================
     return (
         <div className="App">
             <header className="App-header">
@@ -968,118 +1034,123 @@ function App() {
                 )}
 
                 {sharedSecret && (
-    <>
-        {!isVerified ? (
-            // --- VERIFICATION UI ---
-            <div className="connection-section">
-                <h2>Verify Your Connection</h2>
-                <p>To ensure your connection is secure and not intercepted, verbally confirm with your peer that you both see the same two words below.</p>
-                <div style={{ margin: '20px 0', padding: '15px', border: '2px solid #61dafb', borderRadius: '8px', backgroundColor: '#3e4450' }}>
-                    <h3 style={{ margin: 0, fontSize: '2rem', letterSpacing: '2px' }}>
-                        {authenticationString}
-                    </h3>
-                </div>
-                <p>Do the words match?</p>
-                <div>
-                    <button onClick={handleVerificationSuccess} style={{ backgroundColor: '#4CAF50', color: 'white' }}>
-                        Yes, We Match
-                    </button>
-                    <button onClick={handleVerificationFail} style={{ backgroundColor: '#f44336', color: 'white' }}>
-                        No, It's Different
-                    </button>
-                </div>
-            </div>
-        ) : (
-            // --- SECURE CHAT & FILE UI (The old block) ---
-            <div className="chat-section">
-                <h2>Secure Chat (Verified)</h2>
-                
-                <div ref={messageListRef} 
-                className="message-list" style={{ overflowY: 'auto', maxHeight: '300px', border: '1px solid #61dafb', padding: '10px', borderRadius: '5px', marginBottom: '10px' }}>
-                    {chatMessages.map((msg, index) => {
-                        console.log("💬 Rendering message:", msg);
-                        return (
-                            <p key={index} className={msg.sender === 'me' ? 'my-message' : 'peer-message'}>
-                                <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <span>
-                                        <strong>{msg.sender === 'me' ? 'You:' : 'Peer:'}</strong> {msg.content}
-                                        {msg.relayed && <span title="Message sent via server relay (not P2P)"> ☁️</span>}
-                                    </span>
-                                    <span style={{ fontSize: '0.7em', color: '#999', paddingLeft: '15px' }}>
-                                        {msg.timestamp && msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                    </span>
-                                </span>
-                                {msg.relayed && <span title="Message sent via server relay (not P2P)"> ☁️</span>}
-                            </p>
-                        );
-                    })}
-                </div>
-                <div style={{ height: '20px', textAlign: 'left', paddingLeft: '10px', fontStyle: 'italic', color: '#aaa' }}>
-                    {isPeerTyping && <p>Peer is typing...</p>}
-                </div>
-                <div className="message-input">
-                    <input
-                        type="text"
-                        value={messageInput}
-                        onChange={e => setMessageInput(e.target.value)}
-                        onKeyDown={handleTyping}
-                        onKeyPress={e => { if (e.key === 'Enter') sendTextMessage(); }}
-                        placeholder="Type your ephemeral message..."
-                    />
-                    <button
-                        onClick={sendTextMessage}
-                        disabled={
-                            !sharedSecret ||
-                            (dataChannelRef.current?.readyState !== 'open' && ws?.readyState !== WebSocket.OPEN)
-                        }
-                        >
-                        Send Message
-                    </button>
+                    <>
+                        {!isVerified ? (
+                            // --- VERIFICATION UI ---
+                            <div className="connection-section">
+                                <h2>Verify Your Connection</h2>
+                                <p>To ensure your connection is secure and not intercepted, verbally confirm with your peer that you both see the same two words below.</p>
+                                <div style={{ margin: '20px 0', padding: '15px', border: '2px solid #61dafb', borderRadius: '8px', backgroundColor: '#3e4450' }}>
+                                    <h3 style={{ margin: 0, fontSize: '2rem', letterSpacing: '2px' }}>
+                                        {authenticationString}
+                                    </h3>
+                                </div>
+                                <p>Do the words match?</p>
+                                <div>
+                                    <button onClick={handleVerificationSuccess} style={{ backgroundColor: '#4CAF50', color: 'white' }}>
+                                        Yes, We Match
+                                    </button>
+                                    <button onClick={handleVerificationFail} style={{ backgroundColor: '#f44336', color: 'white' }}>
+                                        No, It's Different
+                                    </button>
+                                </div>
+                            </div>
+                        ) : (
+                            // --- SECURE CHAT & FILE UI (The old block) ---
+                            <div className="chat-section">
+                                <h2>Secure Chat (Verified)</h2>
+                                <button  
+                                    type="button"
+                                    onClick={handleTerminateSession}
+                                    style={{ backgroundColor: '#f44336', color: 'white', height: 'fit-content' }}>
+                                    Terminate Session
+                                </button>
+                                           
+                                <div ref={messageListRef} 
+                                className="message-list" style={{ overflowY: 'auto', maxHeight: '300px', border: '1px solid #61dafb', padding: '10px', borderRadius: '5px', marginBottom: '10px' }}>
+                                    {chatMessages.map((msg, index) => {
+                                        console.log("💬 Rendering message:", msg);
+                                        return (
+                                            <p key={index} className={msg.sender === 'me' ? 'my-message' : 'peer-message'}>
+                                                <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                    <span>
+                                                        <strong>{msg.sender === 'me' ? 'You:' : 'Peer:'}</strong> {msg.content}
+                                                        {msg.relayed && <span title="Message sent via server relay (not P2P)"> ☁️</span>}
+                                                    </span>
+                                                    <span style={{ fontSize: '0.7em', color: '#999', paddingLeft: '15px' }}>
+                                                        {msg.timestamp && msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                    </span>
+                                                </span>
+                                            </p>
+                                        );
+                                    })}
+                                </div>
+                                <div style={{ height: '20px', textAlign: 'left', paddingLeft: '10px', fontStyle: 'italic', color: '#aaa' }}>
+                                    {isPeerTyping && <p>Peer is typing...</p>}
+                                </div>
+                                <div className="message-input">
+                                    <input
+                                        type="text"
+                                        value={messageInput}
+                                        onChange={e => setMessageInput(e.target.value)}
+                                        onKeyDown={handleTyping}
+                                        onKeyPress={e => { if (e.key === 'Enter') sendTextMessage(); }}
+                                        placeholder="Type your ephemeral message..."
+                                    />
+                                    <button
+                                        onClick={sendTextMessage}
+                                        disabled={
+                                            !sharedSecret ||
+                                            (dataChannelRef.current?.readyState !== 'open' && ws?.readyState !== WebSocket.OPEN)
+                                        }
+                                        >
+                                        Send Message
+                                    </button>
 
-                </div>
+                                </div>
 
-                <div className="file-sharing" style={{ marginTop: '20px', borderTop: '1px solid #61dafb', paddingTop: '20px' }}>
-                    <h3>Ephemeral File Share</h3>
-                    <input type="file" onChange={handleFileChange} />
-                    <select value={viewDuration} onChange={(e) => setViewDuration(parseInt(e.target.value))}>
-                        <option value={5}>5 seconds</option>
-                        <option value={10}>10 seconds</option>
-                        <option value={30}>30 seconds</option>
-                        <option value={60}>1 minute</option>
-                        <option value={300}>5 minutes</option>
-                    </select>
-                    <button
-                    onClick={sendFile}
-                    disabled={
-                        !fileToShare ||
-                        !dataChannelRef.current ||
-                        dataChannelRef.current.readyState !== 'open' ||
-                        transferringFile
-                    }
-                    >
+                                <div className="file-sharing" style={{ marginTop: '20px', borderTop: '1px solid #61dafb', paddingTop: '20px' }}>
+                                    <h3>Ephemeral File Share</h3>
+                                    <input type="file" onChange={handleFileChange} />
+                                    <select value={viewDuration} onChange={(e) => setViewDuration(parseInt(e.target.value))}>
+                                        <option value={5}>5 seconds</option>
+                                        <option value={10}>10 seconds</option>
+                                        <option value={30}>30 seconds</option>
+                                        <option value={60}>1 minute</option>
+                                        <option value={300}>5 minutes</option>
+                                    </select>
+                                    <button
+                                    onClick={sendFile}
+                                    disabled={
+                                        !fileToShare ||
+                                        !dataChannelRef.current ||
+                                        dataChannelRef.current.readyState !== 'open' ||
+                                        transferringFile
+                                    }
+                                    >
 
-                        {transferringFile ? 'Sending...' : 'Send File (View Once)'}
-                    </button>
-                    {fileToShare && <p>Selected: {fileToShare.name} ({fileToShare.size} bytes)</p>}
+                                        {transferringFile ? 'Sending...' : 'Send File (View Once)'}
+                                    </button>
+                                    {fileToShare && <p>Selected: {fileToShare.name} ({fileToShare.size} bytes)</p>}
 
-                    {currentFileDisplay && (
-                        <div className="file-display" style={{ marginTop: '20px', border: '2px solid red', padding: '10px' }}>
-                            <p>Ephemeral File (Viewing for {currentFileDisplay.duration}s)</p>
-                            {currentFileDisplay.type.startsWith('image/') && (
-                                <img src={currentFileDisplay.url} alt={currentFileDisplay.name} style={{ maxWidth: '100%', maxHeight: '400px' }} />
-                            )}
-                            {currentFileDisplay.type.startsWith('video/') && (
-                                <video src={currentFileDisplay.url} controls autoPlay style={{ maxWidth: '100%', maxHeight: '400px' }} onEnded={clearFileDisplay}></video>
-                            )}
-                            <button onClick={clearFileDisplay}>Clear Now</button>
-                        </div>
-                    )}
-                    {transferringFile && !currentFileDisplay && <p>Processing file transfer...</p>}
-                </div>
-            </div>
-        )}
-    </>
-)}
+                                    {currentFileDisplay && (
+                                        <div className="file-display" style={{ marginTop: '20px', border: '2px solid red', padding: '10px' }}>
+                                            <p>Ephemeral File (Viewing for {currentFileDisplay.duration}s)</p>
+                                            {currentFileDisplay.type.startsWith('image/') && (
+                                                <img src={currentFileDisplay.url} alt={currentFileDisplay.name} style={{ maxWidth: '100%', maxHeight: '400px' }} />
+                                            )}
+                                            {currentFileDisplay.type.startsWith('video/') && (
+                                                <video src={currentFileDisplay.url} controls autoPlay style={{ maxWidth: '100%', maxHeight: '400px' }} onEnded={clearFileDisplay}></video>
+                                            )}
+                                            <button onClick={clearFileDisplay}>Clear Now</button>
+                                        </div>
+                                    )}
+                                    {transferringFile && !currentFileDisplay && <p>Processing file transfer...</p>}
+                                </div>
+                            </div>
+                        )}
+                    </>
+                )}
             </header>
         </div>
     );

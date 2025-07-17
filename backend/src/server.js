@@ -57,6 +57,7 @@ wss.on('connection', ws => {
                 case 'webrtc_answer':
                 case 'webrtc_ice_candidate':
                 case 'encrypted_message':
+                case 'terminate_session':
                     if (data.toCode) {
                         const targetClient = clients.get(data.toCode);
                         if (targetClient && targetClient.readyState === WebSocket.OPEN) {
