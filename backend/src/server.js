@@ -12,8 +12,13 @@ const wss = new WebSocket.Server({ server });
 
 const PORT = process.env.PORT || 8080;
 
-// Serve static files (adjust path for production)
-app.use(express.static(path.join(__dirname, '../public')));
+// Serve the static files from the React app's build directory
+app.use(express.static(path.join(__dirname, '../../frontend/build')));
+
+// Handles any requests that don't match the ones above
+app.get('*', (req, res) =>{
+    res.sendFile(path.join(__dirname, '../../frontend/build/index.html'));
+});
 
 // --- Global map to store active clients by their connection codes ---
 const clients = new Map(); // Map: code -> WebSocket instance

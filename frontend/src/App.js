@@ -407,7 +407,11 @@ function App() {
 
     // --- WebSocket and Connection Management ---
     useEffect(() => {
-        const socket = new WebSocket('ws://localhost:8080');
+        const wsUrl = process.env.NODE_ENV === 'production'
+        ? `wss://${window.location.host}` // Use secure 'wss' for production
+        : 'ws://localhost:8080';       // Keep 'ws' for local development
+
+        const socket = new WebSocket(wsUrl);
 
         socket.onopen = async () => {
             console.log('Connected to WebSocket signaling server.');
