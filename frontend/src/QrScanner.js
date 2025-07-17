@@ -8,14 +8,24 @@ const QrScanner = ({ onScanSuccess, onClose }) => {
     const html5QrCode = new Html5Qrcode("qr-reader"); // The div ID to render the camera in
 
     const qrCodeSuccessCallback = (decodedText, decodedResult) => {
-        // The QR code was successfully scanned
+        // This is the most important log. If you see this, the scanner WORKED.
+        console.log("--- SCANNER SUCCESS ---", decodedText);
+        
+        // An alert is a great way to be 100% sure this function was called.
+        alert(`QR Code Scanned!\nSee console for details.`);
+
+        // Stop the scanner to prevent multiple scans
+        html5QrCode.stop(); 
+
+        // Now, call the original function from App.js
         onScanSuccess(decodedText);
-        // We can stop the scanner here, which will be handled by the unmount cleanup
-    };
+    }
+
 
     const config = { 
         fps: 10, // Frames per second to scan
-        qrbox: { width: 250, height: 250 } // A visible box to guide the user
+        qrbox: { width: 250, height: 250 }, // A visible box to guide the user
+        verbose: true
     };
 
     // Start the scanner
@@ -34,11 +44,17 @@ const QrScanner = ({ onScanSuccess, onClose }) => {
 
     // This is the cleanup function that will be called when the component unmounts
     return () => {
-      html5QrCode.stop().then(ignore => {
-        console.log("QR Code scanning stopped.");
-      }).catch(err => {
-        console.error("Failed to stop QR scanner.", err);
-      });
+      console.log("QR Scanner component unmounting - running cleanup...");
+      // Check if html5QrCode is still running before trying to stop it
+      if (html5QrCode && html5QrCode.isScanning) {
+        html5QrCode.stop().then(ignore => {
+          console.log("QR Code scanning stopped successfully.");
+        }).catch(err => {
+          console.error("Failed to stop QR scanner cleanly.", err);
+        });
+      } else {
+        console.log("QR Scanner cleanup: scanner was not running or already stopped.");
+      }
     };
   }, [onScanSuccess, onClose]);
 
