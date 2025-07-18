@@ -46,10 +46,15 @@ function App() {
     const messageListRef = useRef(null);
     const pongTimeoutRef = useRef(null);
 
+    // Add this with your other useState declarations (around line 47)
+    const [unreadMessages, setUnreadMessages] = useState(0);
+
     // new state variables for SAS
     const [authenticationString, setAuthenticationString] = useState('');
     const [isVerified, setIsVerified] = useState(false); // Tracks if the user has confirmed the SAS
 
+    // Add this with your other useRef declarations (around line 50)
+    const notificationSoundRef = useRef(new Audio('/doki.mp3'));
     //track if the peer is typing
     const [isPeerTyping, setIsPeerTyping] = useState(false);
     
@@ -100,6 +105,16 @@ function App() {
             const decryptedBuffer = await decryptMessage(secret, ciphertext, ivArr);
             const decryptedText = new TextDecoder().decode(decryptedBuffer);
 
+            // Play notification sound when message is received
+            notificationSoundRef.current.play().catch(err => {
+                console.warn('Could not play notification sound:', err);
+            });
+            
+            // If the page is hidden, increment the unread message count
+            if (document.hidden) {
+                setUnreadMessages(prev => prev + 1);
+            }
+
             setChatMessages(prev => [...prev, { 
                 sender: 'peer',
                 content: decryptedText, 
@@ -141,6 +156,17 @@ function App() {
                 switch (parsedData.type) {
                     case 'text':
                         console.log("📩 Received text message via data channel");
+                        
+                        // Play notification sound
+                        notificationSoundRef.current.play().catch(err => {
+                            console.warn('Could not play notification sound:', err);
+                        });
+                        
+                        // If the page is hidden, increment the unread message count
+                        if (document.hidden) {
+                            setUnreadMessages(prev => prev + 1);
+                        }
+                        
                         await handleReceivedMessage(parsedData, secret);
                         break;
 
@@ -667,6 +693,33 @@ function App() {
             messageList.scrollTop = messageList.scrollHeight;
         }
     }, [chatMessages]); // The dependency array ensures this runs only when chatMessages changes
+
+    // Tab title notification for unread messages
+    useEffect(() => {
+        // Function to handle visibility change
+        const handleVisibilityChange = () => {
+            // When the user returns to the tab, clear the unread count and reset the title
+            if (!document.hidden) {
+                setUnreadMessages(0);
+                document.title = 'NYX Messenger';
+            }
+        };
+
+        // If there are unread messages, update the title
+        if (unreadMessages > 0) {
+            document.title = `(${unreadMessages}) NYX Messenger`;
+        } else {
+            document.title = 'NYX Messenger';
+        }
+
+        // Add event listener for when the user switches back to the tab
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+
+        // Cleanup function to remove the listener
+        return () => {
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+        };
+    }, [unreadMessages]); // This effect runs whenever the unreadMessages count changes
 
     // ===================================================================
     // 4. All other regular functions (handlers, etc.) FOURTH
