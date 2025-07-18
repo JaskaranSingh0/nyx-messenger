@@ -1,5 +1,7 @@
 // frontend/src/App.js
 import React, { useEffect, useState, useRef, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { FiWifi, FiWifiOff, FiShield, FiSend, FiUpload, FiCopy, FiX, FiCheck } from 'react-icons/fi';
 import {
     generateSessionKeyPair,
     deriveSharedSecret,
@@ -724,6 +726,7 @@ function App() {
     // ===================================================================
     // 4. All other regular functions (handlers, etc.) FOURTH
     // ===================================================================
+    
     // --- Connection Code Generation & Handling ---
     const generateMyCodeAndSend = async () => {
         if (!sessionKeyPair) {
@@ -1034,168 +1037,367 @@ function App() {
     // ===================================================================
     return (
         <div className="App">
-            <header className="App-header">
-                <h1>NYX Messenger</h1>
-                <p>Status: {connectionStatus}</p>
-                <p>{statusMessage}</p>
+            <div className="animated-background">
+                <div className="circuit-lines"></div>
+                <div className="floating-particles"></div>
+                <div className="grid-overlay"></div>
+            </div>
+            
+            <motion.header 
+                className="App-header"
+                initial={{ opacity: 0, y: -50 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.8, ease: "easeOut" }}
+            >
+                <motion.h1
+                    initial={{ opacity: 0, scale: 0.5 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ duration: 1, delay: 0.2, ease: "easeOut" }}
+                >
+                    NYX Messenger
+                </motion.h1>
+                
+                <motion.div 
+                    className="status-info"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ duration: 0.6, delay: 0.4 }}
+                >
+                    <p>
+                        {connectionStatus === 'Connected to Signaling Server' && <FiWifi />}
+                        {connectionStatus === 'Disconnected' && <FiWifiOff />}
+                        {connectionStatus.includes('Secure') && <FiShield />}
+                        {' '}Status: {connectionStatus}
+                    </p>
+                    <p>{statusMessage}</p>
+                </motion.div>
 
-                {!sharedSecret && (
-                    <div className="connection-section">
-                        <h2>Start Secure Session</h2>
-                        {/* Only show generate button if we have keys and not yet generated a code */}
-                        {sessionKeyPair && !myConnectionCode && (
-                            <button onClick={generateMyCodeAndSend}>Generate Your One-Time Code</button>
-                        )}
-
-                        {myConnectionCode && (
-                            <div style={{ marginTop: '20px' }}>
-                                <div>
-                                    Your Code: <code>{myConnectionCode}</code>
-                                    <button
-                                        onClick={() => {
-                                            navigator.clipboard.writeText(myConnectionCode);
-                                            setCopySuccess('Copied!');
-                                            setTimeout(() => setCopySuccess(''), 2000); // Reset after 2 seconds
-                                        }}
-                                        style={{ marginLeft: '10px' }}
+                <AnimatePresence mode="wait">
+                    {!sharedSecret && (
+                        <motion.div 
+                            className="connection-section"
+                            key="connection"
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -20 }}
+                            transition={{ duration: 0.5 }}
+                        >
+                            <h2>Start Secure Session</h2>
+                            
+                            <AnimatePresence>
+                                {sessionKeyPair && !myConnectionCode && (
+                                    <motion.div
+                                        initial={{ opacity: 0, scale: 0.8 }}
+                                        animate={{ opacity: 1, scale: 1 }}
+                                        exit={{ opacity: 0, scale: 0.8 }}
+                                        transition={{ duration: 0.3 }}
                                     >
-                                        {copySuccess || 'Copy'}
-                                    </button>
-                                </div>
-                                <p>Share this code with your peer.</p>
-                            </div>
-                        )}
-                        <div style={{ marginTop: '20px' }}>
-                            <input
-                                type="text"
-                                value={inputConnectionCode}
-                                onChange={e => setInputConnectionCode(e.target.value)}
-                                placeholder="Enter peer's code to connect"
-                            />
-                            <button type="button" onClick={connectToPeer}>Connect to Peer</button>
-                        </div>
-                    </div>
-                )}
-
-                {sharedSecret && (
-                    <>
-                        {!isVerified ? (
-                            // --- VERIFICATION UI ---
-                            <div className="connection-section">
-                                <h2>Verify Your Connection</h2>
-                                <p>To ensure your connection is secure and not intercepted, verbally confirm with your peer that you both see the same two words below.</p>
-                                <div style={{ margin: '20px 0', padding: '15px', border: '2px solid #61dafb', borderRadius: '8px', backgroundColor: '#3e4450' }}>
-                                    <h3 style={{ margin: 0, fontSize: '2rem', letterSpacing: '2px' }}>
-                                        {authenticationString}
-                                    </h3>
-                                </div>
-                                <p>Do the words match?</p>
-                                <div>
-                                    <button onClick={handleVerificationSuccess} style={{ backgroundColor: '#4CAF50', color: 'white' }}>
-                                        Yes, We Match
-                                    </button>
-                                    <button onClick={handleVerificationFail} style={{ backgroundColor: '#f44336', color: 'white' }}>
-                                        No, It's Different
-                                    </button>
-                                </div>
-                            </div>
-                        ) : (
-                            // --- SECURE CHAT & FILE UI (The old block) ---
-                            <div className="chat-section">
-                                <h2>Secure Chat (Verified)</h2>
-                                <button  
-                                    type="button"
-                                    onClick={handleTerminateSession}
-                                    style={{ backgroundColor: '#f44336', color: 'white', height: 'fit-content' }}>
-                                    Terminate Session
-                                </button>
-                                           
-                                <div ref={messageListRef} 
-                                className="message-list" style={{ overflowY: 'auto', maxHeight: '300px', border: '1px solid #61dafb', padding: '10px', borderRadius: '5px', marginBottom: '10px' }}>
-                                    {chatMessages.map((msg, index) => {
-                                        console.log("💬 Rendering message:", msg);
-                                        return (
-                                            <p key={index} className={msg.sender === 'me' ? 'my-message' : 'peer-message'}>
-                                                <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                                    <span>
-                                                        <strong>{msg.sender === 'me' ? 'You:' : 'Peer:'}</strong> {msg.content}
-                                                        {msg.relayed && <span title="Message sent via server relay (not P2P)"> ☁️</span>}
-                                                    </span>
-                                                    <span style={{ fontSize: '0.7em', color: '#999', paddingLeft: '15px' }}>
-                                                        {msg.timestamp && msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                                    </span>
-                                                </span>
-                                            </p>
-                                        );
-                                    })}
-                                </div>
-                                <div style={{ height: '20px', textAlign: 'left', paddingLeft: '10px', fontStyle: 'italic', color: '#aaa' }}>
-                                    {isPeerTyping && <p>Peer is typing...</p>}
-                                </div>
-                                <div className="message-input">
-                                    <input
-                                        type="text"
-                                        value={messageInput}
-                                        onChange={e => setMessageInput(e.target.value)}
-                                        onKeyDown={handleTyping}
-                                        onKeyPress={e => { if (e.key === 'Enter') sendTextMessage(); }}
-                                        placeholder="Type your ephemeral message..."
-                                    />
-                                    <button
-                                        onClick={sendTextMessage}
-                                        disabled={
-                                            !sharedSecret ||
-                                            (dataChannelRef.current?.readyState !== 'open' && ws?.readyState !== WebSocket.OPEN)
-                                        }
+                                        <motion.button 
+                                            onClick={generateMyCodeAndSend}
+                                            whileHover={{ scale: 1.05 }}
+                                            whileTap={{ scale: 0.95 }}
                                         >
-                                        Send Message
-                                    </button>
+                                            Generate Your One-Time Code
+                                        </motion.button>
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>
 
-                                </div>
-
-                                <div className="file-sharing" style={{ marginTop: '20px', borderTop: '1px solid #61dafb', paddingTop: '20px' }}>
-                                    <h3>Ephemeral File Share</h3>
-                                    <input type="file" onChange={handleFileChange} />
-                                    <select value={viewDuration} onChange={(e) => setViewDuration(parseInt(e.target.value))}>
-                                        <option value={5}>5 seconds</option>
-                                        <option value={10}>10 seconds</option>
-                                        <option value={30}>30 seconds</option>
-                                        <option value={60}>1 minute</option>
-                                        <option value={300}>5 minutes</option>
-                                    </select>
-                                    <button
-                                    onClick={sendFile}
-                                    disabled={
-                                        !fileToShare ||
-                                        !dataChannelRef.current ||
-                                        dataChannelRef.current.readyState !== 'open' ||
-                                        transferringFile
-                                    }
+                            <AnimatePresence>
+                                {myConnectionCode && (
+                                    <motion.div 
+                                        className="code-display"
+                                        initial={{ opacity: 0, y: 20 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        exit={{ opacity: 0, y: -20 }}
+                                        transition={{ duration: 0.5 }}
                                     >
-
-                                        {transferringFile ? 'Sending...' : 'Send File (View Once)'}
-                                    </button>
-                                    {fileToShare && <p>Selected: {fileToShare.name} ({fileToShare.size} bytes)</p>}
-
-                                    {currentFileDisplay && (
-                                        <div className="file-display" style={{ marginTop: '20px', border: '2px solid red', padding: '10px' }}>
-                                            <p>Ephemeral File (Viewing for {currentFileDisplay.duration}s)</p>
-                                            {currentFileDisplay.type.startsWith('image/') && (
-                                                <img src={currentFileDisplay.url} alt={currentFileDisplay.name} style={{ maxWidth: '100%', maxHeight: '400px' }} />
-                                            )}
-                                            {currentFileDisplay.type.startsWith('video/') && (
-                                                <video src={currentFileDisplay.url} controls autoPlay style={{ maxWidth: '100%', maxHeight: '400px' }} onEnded={clearFileDisplay}></video>
-                                            )}
-                                            <button onClick={clearFileDisplay}>Clear Now</button>
+                                        <div>
+                                            Your Code: <code>{myConnectionCode}</code>
+                                            <motion.button
+                                                className="copy-button"
+                                                onClick={() => {
+                                                    navigator.clipboard.writeText(myConnectionCode);
+                                                    setCopySuccess('Copied!');
+                                                    setTimeout(() => setCopySuccess(''), 2000);
+                                                }}
+                                                whileHover={{ scale: 1.05 }}
+                                                whileTap={{ scale: 0.95 }}
+                                            >
+                                                <FiCopy /> {copySuccess || 'Copy'}
+                                            </motion.button>
                                         </div>
-                                    )}
-                                    {transferringFile && !currentFileDisplay && <p>Processing file transfer...</p>}
-                                </div>
-                            </div>
-                        )}
-                    </>
-                )}
-            </header>
+                                        <p>Share this code with your peer.</p>
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>
+                            
+                            <motion.div 
+                                className="margin-top"
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                transition={{ duration: 0.5, delay: 0.3 }}
+                            >
+                                <input
+                                    type="text"
+                                    value={inputConnectionCode}
+                                    onChange={e => setInputConnectionCode(e.target.value)}
+                                    placeholder="Enter peer's code to connect"
+                                />
+                                <motion.button 
+                                    type="button" 
+                                    onClick={connectToPeer}
+                                    whileHover={{ scale: 1.05 }}
+                                    whileTap={{ scale: 0.95 }}
+                                >
+                                    Connect to Peer
+                                </motion.button>
+                            </motion.div>
+                        </motion.div>
+                    )}
+
+                    {sharedSecret && (
+                        <motion.div
+                            key="secured"
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -20 }}
+                            transition={{ duration: 0.5 }}
+                        >
+                            <AnimatePresence mode="wait">
+                                {!isVerified ? (
+                                    <motion.div 
+                                        className="connection-section verification-section"
+                                        key="verification"
+                                        initial={{ opacity: 0, scale: 0.9 }}
+                                        animate={{ opacity: 1, scale: 1 }}
+                                        exit={{ opacity: 0, scale: 0.9 }}
+                                        transition={{ duration: 0.5 }}
+                                    >
+                                        <h2>Verify Your Connection</h2>
+                                        <p>To ensure your connection is secure and not intercepted, verbally confirm with your peer that you both see the same two words below.</p>
+                                        
+                                        <motion.div 
+                                            className="verification-code"
+                                            initial={{ opacity: 0, rotateY: 90 }}
+                                            animate={{ opacity: 1, rotateY: 0 }}
+                                            transition={{ duration: 0.8, delay: 0.2 }}
+                                        >
+                                            <h3>{authenticationString}</h3>
+                                        </motion.div>
+                                        
+                                        <p>Do the words match?</p>
+                                        <div className="verification-buttons">
+                                            <motion.button 
+                                                onClick={handleVerificationSuccess}
+                                                className="success-button"
+                                                whileHover={{ scale: 1.05 }}
+                                                whileTap={{ scale: 0.95 }}
+                                            >
+                                                <FiCheck /> Yes, We Match
+                                            </motion.button>
+                                            <motion.button 
+                                                onClick={handleVerificationFail}
+                                                className="danger-button"
+                                                whileHover={{ scale: 1.05 }}
+                                                whileTap={{ scale: 0.95 }}
+                                            >
+                                                <FiX /> No, It's Different
+                                            </motion.button>
+                                        </div>
+                                    </motion.div>
+                                ) : (
+                                    <motion.div 
+                                        className="chat-section"
+                                        key="chat"
+                                        initial={{ opacity: 0, y: 20 }}
+                                        animate={{ opacity: 1, y: 0 }}
+                                        exit={{ opacity: 0, y: -20 }}
+                                        transition={{ duration: 0.5 }}
+                                    >
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                                            <h2>Secure Chat (Verified)</h2>
+                                            <motion.button  
+                                                type="button"
+                                                onClick={handleTerminateSession}
+                                                className="danger-button"
+                                                whileHover={{ scale: 1.05 }}
+                                                whileTap={{ scale: 0.95 }}
+                                            >
+                                                <FiX /> Terminate Session
+                                            </motion.button>
+                                        </div>
+                                        
+                                        <div ref={messageListRef} className="message-list">
+                                            <AnimatePresence>
+                                                {chatMessages.map((msg, index) => (
+                                                    <motion.p 
+                                                        key={index} 
+                                                        className={msg.sender === 'me' ? 'my-message' : 'peer-message'}
+                                                        initial={{ opacity: 0, x: msg.sender === 'me' ? 50 : -50 }}
+                                                        animate={{ opacity: 1, x: 0 }}
+                                                        exit={{ opacity: 0, x: msg.sender === 'me' ? 50 : -50 }}
+                                                        transition={{ duration: 0.3 }}
+                                                    >
+                                                        <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                            <span>
+                                                                <strong>{msg.sender === 'me' ? 'You:' : 'Peer:'}</strong> {msg.content}
+                                                                {msg.relayed && <span title="Message sent via server relay (not P2P)"> ☁️</span>}
+                                                            </span>
+                                                            <span style={{ fontSize: '0.7em', color: '#999', paddingLeft: '15px' }}>
+                                                                {msg.timestamp && msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                            </span>
+                                                        </span>
+                                                    </motion.p>
+                                                ))}
+                                            </AnimatePresence>
+                                        </div>
+                                        
+                                        <div className="typing-indicator">
+                                            <AnimatePresence>
+                                                {isPeerTyping && (
+                                                    <motion.p
+                                                        initial={{ opacity: 0, y: 10 }}
+                                                        animate={{ opacity: 1, y: 0 }}
+                                                        exit={{ opacity: 0, y: -10 }}
+                                                        transition={{ duration: 0.3 }}
+                                                    >
+                                                        Peer is typing...
+                                                    </motion.p>
+                                                )}
+                                            </AnimatePresence>
+                                        </div>
+                                        
+                                        <div className="message-input">
+                                            <input
+                                                type="text"
+                                                value={messageInput}
+                                                onChange={e => setMessageInput(e.target.value)}
+                                                onKeyDown={handleTyping}
+                                                onKeyPress={e => { if (e.key === 'Enter') sendTextMessage(); }}
+                                                placeholder="Type your ephemeral message..."
+                                            />
+                                            <motion.button
+                                                onClick={sendTextMessage}
+                                                disabled={
+                                                    !sharedSecret ||
+                                                    (dataChannelRef.current?.readyState !== 'open' && ws?.readyState !== WebSocket.OPEN)
+                                                }
+                                                whileHover={{ scale: 1.05 }}
+                                                whileTap={{ scale: 0.95 }}
+                                            >
+                                                <FiSend /> Send Message
+                                            </motion.button>
+                                        </div>
+
+                                        <motion.div 
+                                            className="file-sharing"
+                                            initial={{ opacity: 0, y: 20 }}
+                                            animate={{ opacity: 1, y: 0 }}
+                                            transition={{ duration: 0.5, delay: 0.3 }}
+                                        >
+                                            <h3>Ephemeral File Share</h3>
+                                            <div className="file-controls">
+                                                <input type="file" onChange={handleFileChange} />
+                                                <select value={viewDuration} onChange={(e) => setViewDuration(parseInt(e.target.value))}>
+                                                    <option value={5}>5 seconds</option>
+                                                    <option value={10}>10 seconds</option>
+                                                    <option value={30}>30 seconds</option>
+                                                    <option value={60}>1 minute</option>
+                                                    <option value={300}>5 minutes</option>
+                                                </select>
+                                                <motion.button
+                                                    onClick={sendFile}
+                                                    disabled={
+                                                        !fileToShare ||
+                                                        !dataChannelRef.current ||
+                                                        dataChannelRef.current.readyState !== 'open' ||
+                                                        transferringFile
+                                                    }
+                                                    whileHover={{ scale: 1.05 }}
+                                                    whileTap={{ scale: 0.95 }}
+                                                >
+                                                    <FiUpload /> {transferringFile ? 'Sending...' : 'Send File (View Once)'}
+                                                </motion.button>
+                                            </div>
+                                            
+                                            <AnimatePresence>
+                                                {fileToShare && (
+                                                    <motion.div
+                                                        className="file-info"
+                                                        initial={{ opacity: 0, y: 10 }}
+                                                        animate={{ opacity: 1, y: 0 }}
+                                                        exit={{ opacity: 0, y: -10 }}
+                                                        transition={{ duration: 0.3 }}
+                                                    >
+                                                        <p>Selected: {fileToShare.name} ({fileToShare.size} bytes)</p>
+                                                    </motion.div>
+                                                )}
+                                            </AnimatePresence>
+
+                                            <AnimatePresence>
+                                                {currentFileDisplay && (
+                                                    <motion.div 
+                                                        className="file-display"
+                                                        initial={{ opacity: 0, scale: 0.9 }}
+                                                        animate={{ opacity: 1, scale: 1 }}
+                                                        exit={{ opacity: 0, scale: 0.9 }}
+                                                        transition={{ duration: 0.5 }}
+                                                    >
+                                                        <p>Ephemeral File (Viewing for {currentFileDisplay.duration}s)</p>
+                                                        {currentFileDisplay.type.startsWith('image/') && (
+                                                            <motion.img 
+                                                                src={currentFileDisplay.url} 
+                                                                alt={currentFileDisplay.name} 
+                                                                initial={{ opacity: 0, scale: 0.8 }}
+                                                                animate={{ opacity: 1, scale: 1 }}
+                                                                transition={{ duration: 0.3 }}
+                                                            />
+                                                        )}
+                                                        {currentFileDisplay.type.startsWith('video/') && (
+                                                            <motion.video 
+                                                                src={currentFileDisplay.url} 
+                                                                controls 
+                                                                autoPlay 
+                                                                onEnded={clearFileDisplay}
+                                                                initial={{ opacity: 0, scale: 0.8 }}
+                                                                animate={{ opacity: 1, scale: 1 }}
+                                                                transition={{ duration: 0.3 }}
+                                                            />
+                                                        )}
+                                                        <motion.button 
+                                                            onClick={clearFileDisplay}
+                                                            className="danger-button"
+                                                            whileHover={{ scale: 1.05 }}
+                                                            whileTap={{ scale: 0.95 }}
+                                                        >
+                                                            <FiX /> Clear Now
+                                                        </motion.button>
+                                                    </motion.div>
+                                                )}
+                                            </AnimatePresence>
+                                            
+                                            <AnimatePresence>
+                                                {transferringFile && !currentFileDisplay && (
+                                                    <motion.div
+                                                        initial={{ opacity: 0, y: 10 }}
+                                                        animate={{ opacity: 1, y: 0 }}
+                                                        exit={{ opacity: 0, y: -10 }}
+                                                        transition={{ duration: 0.3 }}
+                                                    >
+                                                        <p>Processing file transfer...</p>
+                                                        <div className="loading"></div>
+                                                    </motion.div>
+                                                )}
+                                            </AnimatePresence>
+                                        </motion.div>
+                                    </motion.div>
+                                )}
+                            </AnimatePresence>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+            </motion.header>
         </div>
     );
 }
