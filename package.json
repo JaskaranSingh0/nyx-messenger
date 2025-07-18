@@ -1,4 +1,5 @@
 {
+  "$schema": "https://json.schemastore.org/package.json",
   "name": "nyx-messenger-root",
   "version": "1.0.0",
   "description": "Root package for NYX Messenger",

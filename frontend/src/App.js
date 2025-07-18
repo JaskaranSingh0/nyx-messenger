@@ -1,6 +1,5 @@
 // frontend/src/App.js
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { QRCodeSVG } from 'qrcode.react';
 import {
     generateSessionKeyPair,
     deriveSharedSecret,
@@ -13,7 +12,6 @@ import {
     zeroFill
 } from './cryptoUtils';
 import './App.css';
-import QrScanner from './QrScanner';
 
 function App() {
     // ===================================================================
@@ -34,7 +32,6 @@ function App() {
     const [peerConnectionCode, setPeerConnectionCode] = useState('');
     const peerConnectionCodeRef = useRef(''); // Ref for latest peerConnectionCode
     const [statusMessage, setStatusMessage] = useState('');
-    const [qrValue, setQrValue] = useState('');
     const [inputConnectionCode, setInputConnectionCode] = useState('');
     
     // File sharing state
@@ -43,10 +40,6 @@ function App() {
     const [currentFileDisplay, setCurrentFileDisplay] = useState(null);
     const fileTimerRef = useRef(null);
     const [transferringFile, setTransferringFile] = useState(false);
-
-
-    // qr scanner state
-    const [isScannerOpen, setIsScannerOpen] = useState(false);
 
     // This prevents us from sending too many messages
     const typingTimeoutRef = useRef(null);
@@ -434,12 +427,7 @@ function App() {
             const code = generateRandomCode(8);
             setMyConnectionCode(code);
             myConnectionCodeRef.current = code; // Update ref for current code
-            // We now have access to kp.publicKey because the await above has completed.
-            const publicKeyJwk = await exportPublicKey(kp.publicKey); // Use kp directly
-            console.log("Exported JWK:", publicKeyJwk); // <-- Add this
-            setQrValue(JSON.stringify({ code: code, publicKey: publicKeyJwk })); // Update QR value here
-            console.log("QR Payload:", { code: code, publicKey: publicKeyJwk });
-
+            
             // Register our code with the server
             if (socket && socket.readyState === WebSocket.OPEN) {
                 socket.send(JSON.stringify({ type: 'register_code', code: code }));
@@ -450,7 +438,6 @@ function App() {
             setTimeout(() => {
                 setMyConnectionCode(currentCode => {
                     if (currentCode === code) { // Only expire if it's still the active code
-                        setQrValue('');
                         setStatusMessage('Connection code expired. Generate a new one to invite a peer.');
                         return '';
                     }
@@ -684,7 +671,7 @@ function App() {
     // ===================================================================
     // 4. All other regular functions (handlers, etc.) FOURTH
     // ===================================================================
-    // --- Connection Code / QR Code Generation & Handling ---
+    // --- Connection Code Generation & Handling ---
     const generateMyCodeAndSend = async () => {
         if (!sessionKeyPair) {
             setStatusMessage('Generating keys... please wait.');
@@ -694,12 +681,7 @@ function App() {
         setMyConnectionCode(code);
         myConnectionCodeRef.current = code; // Update ref
 
-        const publicKeyJwk = await exportPublicKey(sessionKeyPair.publicKey);
-        console.log("Exported JWK:", publicKeyJwk); // <-- Add this
-        const qrData = JSON.stringify({ code: code, publicKey: publicKeyJwk });
-        setQrValue(qrData);
-
-        setStatusMessage(`Share this code or QR: ${code}. Valid for 60 seconds. Awaiting peer connection...`);
+        setStatusMessage(`Share this code: ${code}. Valid for 60 seconds. Awaiting peer connection...`);
         // Register our code with the server
         if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: 'register_code', code: code }));
@@ -709,7 +691,6 @@ function App() {
         setTimeout(() => {
             setMyConnectionCode(currentCode => {
                 if (currentCode === code) { // Only expire if it's still the active code
-                    setQrValue('');
                     setStatusMessage('Connection code expired. Generate a new one to invite a peer.');
                     return '';
                 }
@@ -718,10 +699,10 @@ function App() {
         }, 60 * 1000); // 60 seconds validity
     };
 
-    const connectToPeer = async (e, codeFromScanner = null) => {
+    const connectToPeer = async (e) => {
         if (e && e.preventDefault) e.preventDefault();
 
-        const peerCode = codeFromScanner || inputConnectionCode; // Use scanner code if available
+        const peerCode = inputConnectionCode;
 
         try {
             console.log("🔹 connectToPeer triggered");
@@ -730,8 +711,8 @@ function App() {
                 setStatusMessage('Not connected to signaling server.');
                 return;
             }
-            if (!peerCode) { // Check the combined peerCode variable
-                setStatusMessage('Please enter or scan a peer code.');
+            if (!peerCode) {
+                setStatusMessage('Please enter a peer code.');
                 return;
             }
             if (!sessionKeyPair) {
@@ -749,7 +730,7 @@ function App() {
 
             ws.send(JSON.stringify({
                 type: 'session_offer',
-                toCode: peerCode, // Use peerCode here
+                toCode: peerCode,
                 fromCode: myConnectionCodeRef.current,
                 publicKeyJwk: ourPublicKeyJwk
             }));
@@ -758,33 +739,6 @@ function App() {
             setStatusMessage(`Sending connection offer to peer with code: ${peerCode}`);
         } catch (err) {
             console.error("❌ connectToPeer error:", err);
-        }
-    };
-
-    const handleScanSuccess = (decodedText) => {
-        console.log(`Scanned QR successfully: ${decodedText}`);
-        setIsScannerOpen(false); // Close the scanner immediately
-
-        try {
-            const qrData = JSON.parse(decodedText);
-            if (qrData.code) {
-                // We found a code! Set it in the input and connect.
-                setInputConnectionCode(qrData.code);
-                // We need to call connectToPeer in a way that uses the new state.
-                // A short timeout ensures the state has updated before connecting.
-                setTimeout(() => {
-                    // We need to get the peer code from a ref here because `connectToPeer`
-                    // might be called before the state update re-renders the component.
-                    // Let's ensure connectToPeer uses the value directly.
-                    connectToPeer(null, qrData.code);
-                }, 50);
-
-            } else {
-                setStatusMessage('Scanned QR code is invalid (missing code).');
-            }
-        } catch (error) {
-            console.error("Failed to parse QR code data", error);
-            setStatusMessage('Failed to read QR code. Is it a valid NYX code?');
         }
     };
 
@@ -1055,8 +1009,7 @@ function App() {
                                         {copySuccess || 'Copy'}
                                     </button>
                                 </div>
-                                {qrValue && <div style={{marginTop: '10px'}}><QRCodeSVG value={qrValue} size={128} level="H" /></div>}
-                                <p>Share this code or QR with your peer.</p>
+                                <p>Share this code with your peer.</p>
                             </div>
                         )}
                         <div style={{ marginTop: '20px' }}>
@@ -1067,10 +1020,6 @@ function App() {
                                 placeholder="Enter peer's code to connect"
                             />
                             <button type="button" onClick={connectToPeer}>Connect to Peer</button>
-                            {/* --- ADD THE SCANNER BUTTON --- */}
-                            <button type="button" onClick={() => setIsScannerOpen(true)} style={{ marginLeft: '5px' }}>
-                                Scan QR
-                            </button>
                         </div>
                     </div>
                 )}
@@ -1192,14 +1141,6 @@ function App() {
                             </div>
                         )}
                     </>
-                )}
-                {/* QR Scanner Component */}
-                
-                {isScannerOpen && (
-                    <QrScanner 
-                        onScanSuccess={handleScanSuccess} 
-                        onClose={() => setIsScannerOpen(false)} 
-                    />
                 )}
             </header>
         </div>
