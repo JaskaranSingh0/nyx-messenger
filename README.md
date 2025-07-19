@@ -205,9 +205,13 @@ NYX Messenger follows a **Container/Presentational component pattern** for optim
 - **Verification**: SHA-256 based SAS generation
 
 ### WebRTC Features
-- **Data Channels**: Reliable ordered message delivery
-- **ICE Candidates**: NAT traversal for peer connections
-- **Connection Management**: Automatic reconnection and error handling
+- **Data Channels**: Reliable ordered message delivery for P2P communication
+- **ICE Candidates**: Advanced NAT traversal with multiple STUN/TURN servers
+- **Connection Management**: Automatic reconnection, retry logic, and graceful fallbacks
+- **Enhanced Connectivity**: Multiple TURN servers for improved success rate in restrictive networks
+- **Connection Monitoring**: Real-time connection state tracking with detailed diagnostics
+- **Fallback System**: Automatic server relay when P2P connection fails
+- **Timeout Handling**: Smart timeouts with retry mechanisms for connection establishment
 
 ## 🔐 Security Considerations
 
@@ -276,7 +280,11 @@ NYX Messenger is designed for secure communication but should not be used for se
 - [ ] Message threading and organization
 
 ### ✅ Recent Improvements
-- [x] **Component Architecture Refactor** (Latest): Restructured codebase into maintainable, reusable components
+- [x] **Enhanced WebRTC Connectivity** (Latest): Improved P2P connection reliability with multiple TURN servers and retry logic
+- [x] **Production Network Support**: Better handling of restrictive networks and NAT traversal
+- [x] **Connection Diagnostics**: Enhanced debugging and monitoring for WebRTC connections
+- [x] **Graceful Fallbacks**: Automatic server relay when P2P connections fail
+- [x] **Component Architecture Refactor**: Restructured codebase into maintainable, reusable components
 - [x] **Container/Presentational Pattern**: Separated business logic from UI presentation
 - [x] **Code Validity Timer**: Added 60-second countdown for connection codes
 - [x] **Enhanced Error Handling**: Improved connection state management and user feedback

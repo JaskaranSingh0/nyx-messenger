@@ -307,13 +307,29 @@ function App() {
         };
 
         dataChannel.onclose = () => {
-            console.log('WebRTC Data Channel CLOSED!');
+            console.log('❌ WebRTC Data Channel CLOSED!');
             setConnectionStatus('Secure Session Active (WebRTC Closed)');
-            setStatusMessage('WebRTC channel closed. Messages may revert to server relay or connection lost. Re-initiate connection if needed.');
+            setStatusMessage('WebRTC channel closed. File sharing disabled. Messages will use server relay.');
         };
         dataChannel.onerror = (error) => {
-            console.error('WebRTC Data Channel ERROR:', error);
-            setStatusMessage('WebRTC channel error: ' + error.message);
+            console.error('❌ WebRTC Data Channel ERROR:', error);
+            setConnectionStatus('WebRTC Error');
+            setStatusMessage(`WebRTC channel error: ${error.message || 'Connection failed'}. File sharing disabled.`);
+        };
+        
+        // Add connection timeout for data channel
+        const channelTimeout = setTimeout(() => {
+            if (dataChannel.readyState !== 'open') {
+                console.warn("⏰ Data channel connection timeout");
+                setStatusMessage('P2P connection timeout. Using server relay for messages.');
+            }
+        }, 15000); // 15 second timeout for data channel
+        
+        // Clear timeout when channel opens
+        const originalOnOpen = dataChannel.onopen;
+        dataChannel.onopen = () => {
+            clearTimeout(channelTimeout);
+            if (originalOnOpen) originalOnOpen();
         };
     }, [handleReceivedMessage, clearFileDisplay]);
 
@@ -383,13 +399,19 @@ function App() {
 
         const peerConnection = new RTCPeerConnection({
             iceServers: [
-                // Start with the reliable Google STUN servers
+                // Primary Google STUN servers (most reliable)
                 { urls: 'stun:stun.l.google.com:19302' },
                 { urls: 'stun:stun1.l.google.com:19302' },
                 { urls: 'stun:stun2.l.google.com:19302' },
+                { urls: 'stun:stun3.l.google.com:19302' },
+                { urls: 'stun:stun4.l.google.com:19302' },
                 
-                // Add a few public TURN servers as fallbacks
-                // These are often rate-limited or unreliable, but having several increases the chance of one working.
+                // Additional reliable STUN servers
+                { urls: 'stun:stun.stunprotocol.org:3478' },
+                { urls: 'stun:stun.voiparound.com' },
+                { urls: 'stun:stun.voipbuster.com' },
+                
+                // TURN servers (for NAT traversal) - Multiple providers for redundancy
                 {
                     urls: 'turn:openrelay.metered.ca:80',
                     username: 'openrelayproject',
@@ -410,19 +432,65 @@ function App() {
                     username: 'openrelayproject',
                     credential: 'openrelayproject'
                 },
-                // You can find more public servers online, but be cautious.
-            ]
+                // Additional TURN servers for better reliability
+                {
+                    urls: 'turns:openrelay.metered.ca:443',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
+                },
+                {
+                    urls: 'turns:openrelay.metered.ca:443?transport=tcp',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
+                }
+            ],
+            // Additional configuration for better connectivity
+            iceCandidatePoolSize: 10,
+            bundlePolicy: 'max-bundle',
+            rtcpMuxPolicy: 'require'
         });
         peerConnectionRef.current = peerConnection;
         
+        // Enhanced connection state monitoring
         peerConnection.onconnectionstatechange = () => {
             console.log("🔄 PeerConnection state:", peerConnection.connectionState);
+            setStatusMessage(`WebRTC Connection: ${peerConnection.connectionState}`);
+            
+            if (peerConnection.connectionState === 'failed') {
+                console.error("❌ WebRTC connection failed. Attempting restart...");
+                setStatusMessage('P2P connection failed. Retrying...');
+                // Attempt to restart ICE
+                peerConnection.restartIce();
+            } else if (peerConnection.connectionState === 'disconnected') {
+                console.warn("⚠️ WebRTC connection disconnected");
+                setStatusMessage('P2P connection lost. Messages will use server relay.');
+            } else if (peerConnection.connectionState === 'connected') {
+                console.log("✅ WebRTC peer connection established!");
+                setStatusMessage('Direct P2P connection active!');
+            }
+        };
+        
+        // Enhanced ICE connection state monitoring
+        peerConnection.oniceconnectionstatechange = () => {
+            console.log("🧊 ICE Connection state:", peerConnection.iceConnectionState);
+            console.log("🧊 ICE Gathering state:", peerConnection.iceGatheringState);
+            
+            if (peerConnection.iceConnectionState === 'failed') {
+                console.error("❌ ICE connection failed");
+                setStatusMessage('NAT traversal failed. File sharing may not work.');
+            } else if (peerConnection.iceConnectionState === 'disconnected') {
+                console.warn("⚠️ ICE connection disconnected");
+            } else if (peerConnection.iceConnectionState === 'connected' || peerConnection.iceConnectionState === 'completed') {
+                console.log("✅ ICE connection successful!");
+            }
         };
 
-        // --- ICE Candidate handling ---
+        // --- ICE Candidate handling with enhanced debugging ---
         peerConnection.onicecandidate = (event) => {
             if (event.candidate) {
-                console.log('Sending ICE candidate:', event.candidate);
+                console.log('🧊 Sending ICE candidate type:', event.candidate.type, 
+                           'protocol:', event.candidate.protocol, 
+                           'address:', event.candidate.address);
                 console.log(`[onicecandidate] toCode: ${targetPeerCode}, fromCode: ${myCode}`);
                 socket.send(JSON.stringify({
                     type: 'webrtc_ice_candidate',
@@ -430,6 +498,8 @@ function App() {
                     toCode: targetPeerCode, // Use passed targetPeerCode
                     fromCode: myCode // Use passed myCode
                 }));
+            } else {
+                console.log('🧊 ICE gathering complete - all candidates sent');
             }
         };
 
@@ -459,14 +529,33 @@ function App() {
             }
             const offer = await peerConnection.createOffer();
             await peerConnection.setLocalDescription(offer);
-            console.log('Sending WebRTC offer:', offer);
+            console.log('📤 Sending WebRTC offer:', offer);
             socket.send(JSON.stringify({
                 type: 'webrtc_offer',
                 sdp: offer,
                 toCode: targetPeerCode,
                 fromCode: myCode
             }));
-        }   
+        }
+        
+        // Set a timeout for WebRTC connection establishment
+        const connectionTimeout = setTimeout(() => {
+            if (peerConnection.connectionState !== 'connected' && 
+                peerConnection.connectionState !== 'completed') {
+                console.warn("⏰ WebRTC connection timeout - connection taking too long");
+                setStatusMessage('P2P connection taking longer than expected. Messages will use server relay for now.');
+            }
+        }, 30000); // 30 second timeout
+        
+        // Clear timeout when connection succeeds
+        const originalOnConnectionStateChange = peerConnection.onconnectionstatechange;
+        peerConnection.onconnectionstatechange = () => {
+            if (originalOnConnectionStateChange) originalOnConnectionStateChange();
+            if (peerConnection.connectionState === 'connected' || 
+                peerConnection.connectionState === 'completed') {
+                clearTimeout(connectionTimeout);
+            }
+        };   
     }, [bindDataChannelEvents]); // bindDataChannelEvents is a dependency here
     
     // --- THIS IS THE CRITICAL PART: DEFINE resetSession HERE ---
@@ -681,10 +770,35 @@ function App() {
                         setStatusMessage('Shared secret derived. Secure session established! Setting up WebRTC...');
                         setConnectionStatus('Secure Session Active');
                         
-                        // Pass explicit current codes to setupWebRTC
-                        setTimeout(() => {
-                            setupWebRTC(socket, false, currentMyCode, currentPeerCode);
-                        }, 100); // or even 250ms
+                        // Pass explicit current codes to setupWebRTC with retry logic
+                        const attemptWebRTC = async (attempt = 1) => {
+                            try {
+                                console.log(`🔄 WebRTC setup attempt ${attempt}/3`);
+                                await setupWebRTC(socket, false, currentMyCode, currentPeerCode);
+                                
+                                // Wait a bit and check if connection succeeded
+                                setTimeout(() => {
+                                    if (peerConnectionRef.current && 
+                                        peerConnectionRef.current.connectionState !== 'connected' && 
+                                        peerConnectionRef.current.connectionState !== 'completed' &&
+                                        attempt < 3) {
+                                        console.log(`⚠️ WebRTC attempt ${attempt} failed, retrying...`);
+                                        setStatusMessage(`WebRTC attempt ${attempt} failed, retrying... (${attempt + 1}/3)`);
+                                        attemptWebRTC(attempt + 1);
+                                    } else if (attempt >= 3) {
+                                        console.warn("❌ All WebRTC attempts failed");
+                                        setStatusMessage('P2P connection failed after 3 attempts. Messages will use server relay. File sharing may not work.');
+                                    }
+                                }, 10000); // Wait 10 seconds before checking/retrying
+                            } catch (error) {
+                                console.error(`❌ WebRTC setup attempt ${attempt} error:`, error);
+                                if (attempt < 3) {
+                                    setTimeout(() => attemptWebRTC(attempt + 1), 2000);
+                                }
+                            }
+                        };
+                        
+                        setTimeout(() => attemptWebRTC(), 100);
                     } catch (error) {
                         console.error('Error handling session answer:', error);
                         setStatusMessage('Failed to establish session: ' + error.message);
