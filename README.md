@@ -2,7 +2,6 @@
 
 A secure, end-to-end encrypted messenger with peer-to-peer communication, featuring ephemeral messaging and a cyberpunk-inspired interface. NYX Messenger
 
-A secure, end-to-end encrypted messenger with peer-to-peer communication, featuring ephemeral messaging and a cyberpunk-inspired interface.
 
 **🔗 Live Demo:** [https://nyx-messenger.onrender.com/](https://nyx-messenger.onrender.com/)
 
