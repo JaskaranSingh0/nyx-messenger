@@ -92,6 +92,7 @@ function App() {
 
     // Start code validity countdown timer
     const startCodeValidityTimer = () => {
+        console.log("▶️ Starting code validity timer");
         setCodeValidityTime(60); // 60 seconds validity
         setIsCodeActive(true);
         
@@ -102,6 +103,7 @@ function App() {
         validityTimerRef.current = setInterval(() => {
             setCodeValidityTime(prev => {
                 if (prev <= 1) {
+                    console.log("⏰ Code validity timer expired");
                     setIsCodeActive(false);
                     clearInterval(validityTimerRef.current);
                     return 0;
@@ -113,12 +115,15 @@ function App() {
 
     // Stop code validity timer
     const stopCodeValidityTimer = () => {
+        console.log("🛑 Stopping code validity timer, isCodeActive:", isCodeActive);
         if (validityTimerRef.current) {
             clearInterval(validityTimerRef.current);
             validityTimerRef.current = null;
+            console.log("🛑 Timer interval cleared");
         }
         setCodeValidityTime(0);
         setIsCodeActive(false);
+        console.log("🛑 Timer state reset: isCodeActive=false, codeValidityTime=0");
     };
 
     // ===================================================================
@@ -190,6 +195,9 @@ function App() {
             console.log('✅ WebRTC Data Channel OPEN!');
             setConnectionStatus('Secure WebRTC Channel Active');
             setStatusMessage('You are now directly connected peer-to-peer! Messaging is direct.');
+            
+            // Stop the code validity timer since P2P connection is now established
+            stopCodeValidityTimer();
         };
        
         dataChannel.onmessage = async (event) => {
@@ -476,6 +484,14 @@ function App() {
         };
     }, []);
 
+    // Stop timer when shared secret is established
+    useEffect(() => {
+        if (sharedSecret) {
+            console.log("🔐 Shared secret established, stopping code validity timer");
+            stopCodeValidityTimer();
+        }
+    }, [sharedSecret]);
+
     // Handle page unload for debugging
     useEffect(() => {
         const handleBeforeUnload = (e) => {
@@ -553,6 +569,9 @@ function App() {
 
                 case 'session_offer':
                     // This is the first step for User B (the receiver)
+                    // Stop the code validity timer immediately since someone is connecting
+                    stopCodeValidityTimer();
+                    
                     if (!sessionKeyPairRef.current) {
                         console.error('Session key pair not available in ref for session_offer.');
                         setStatusMessage('Error: Session key not ready for offer. Please refresh.');
@@ -596,9 +615,6 @@ function App() {
                         setStatusMessage('Shared secret derived. Secure session active! Waiting for peer to start direct connection...');
                         setConnectionStatus('Secure Session Active');
                         
-                        // Stop the code validity timer since connection is established
-                        stopCodeValidityTimer();
-                        
                         // THE FIX: We DO NOT call setupWebRTC here. The receiver waits for the 'webrtc_offer'.
 
                     } catch (error) {
@@ -609,6 +625,9 @@ function App() {
 
                 case 'session_answer':
                     // This is the response for User A after sending an offer
+                    // Stop the code validity timer immediately since we got a response
+                    stopCodeValidityTimer();
+                    
                     // Ensure sessionKeyPair is available before proceeding
                     if (!sessionKeyPairRef.current) {
                         console.error('Session key pair not available in ref for session_answer.');
@@ -636,9 +655,6 @@ function App() {
 
                         setStatusMessage('Shared secret derived. Secure session established! Setting up WebRTC...');
                         setConnectionStatus('Secure Session Active');
-                        
-                        // Stop the code validity timer since connection is established
-                        stopCodeValidityTimer();
                         
                         // Pass explicit current codes to setupWebRTC
                         setTimeout(() => {
@@ -834,6 +850,9 @@ function App() {
     const connectToPeer = async (e) => {
         if (e && e.preventDefault) e.preventDefault();
 
+        // Stop the code validity timer immediately when user attempts to connect
+        stopCodeValidityTimer();
+
         const peerCode = inputConnectionCode;
 
         try {
@@ -841,14 +860,17 @@ function App() {
 
             if (!ws || ws.readyState !== WebSocket.OPEN) {
                 setStatusMessage('Not connected to signaling server.');
+                stopCodeValidityTimer(); // Stop timer even on error
                 return;
             }
             if (!peerCode) {
                 setStatusMessage('Please enter a peer code.');
+                stopCodeValidityTimer(); // Stop timer even on error
                 return;
             }
             if (!sessionKeyPair) {
                 setStatusMessage('Generating keys... please wait.');
+                stopCodeValidityTimer(); // Stop timer even on error
                 return;
             }
 
@@ -871,6 +893,8 @@ function App() {
             setStatusMessage(`Sending connection offer to peer with code: ${peerCode}`);
         } catch (err) {
             console.error("❌ connectToPeer error:", err);
+            setStatusMessage('Error connecting to peer: ' + err.message);
+            stopCodeValidityTimer(); // Stop timer even on error
         }
     };
 
@@ -1069,6 +1093,9 @@ function App() {
     const handleVerificationSuccess = () => {
         setIsVerified(true);
         setStatusMessage('Connection verified! Chat enabled.');
+        
+        // Stop the code validity timer since connection is now verified and active
+        stopCodeValidityTimer();
     };
 
     const handleVerificationFail = () => {
