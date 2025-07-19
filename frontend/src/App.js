@@ -84,6 +84,53 @@ function App() {
     // ===================================================================
     // Helper Functions
     // ===================================================================
+    
+    // Test ICE server connectivity (diagnostic function)
+    const testICEConnectivity = async () => {
+        if (process.env.NODE_ENV !== 'production') return;
+        
+        console.log('🧪 Testing ICE server connectivity...');
+        const testPC = new RTCPeerConnection({
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' }
+            ]
+        });
+        
+        try {
+            // Create a test data channel to trigger ICE gathering
+            testPC.createDataChannel('test');
+            
+            // Create offer to start ICE gathering
+            const offer = await testPC.createOffer();
+            await testPC.setLocalDescription(offer);
+            
+            // Wait for ICE gathering
+            await new Promise((resolve) => {
+                const timeout = setTimeout(() => {
+                    console.log('🧪 ICE gathering timeout');
+                    resolve();
+                }, 5000);
+                
+                testPC.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        console.log('🧪 ICE candidate found:', event.candidate.type, event.candidate.candidate);
+                        if (event.candidate.type === 'relay') {
+                            console.log('✅ TURN server working!');
+                        }
+                    } else {
+                        clearTimeout(timeout);
+                        resolve();
+                    }
+                };
+            });
+        } catch (error) {
+            console.error('❌ ICE connectivity test failed:', error);
+        } finally {
+            testPC.close();
+        }
+    };
+    
     // Format code validity time for display
     const formatValidityTime = (seconds) => {
         if (seconds <= 0) return "00:00";
@@ -333,6 +380,56 @@ function App() {
         };
     }, [handleReceivedMessage, clearFileDisplay]);
 
+    // Function to test STUN/TURN server connectivity
+    const testSTUNTURNConnectivity = useCallback(async () => {
+        console.log('🧪 Testing STUN/TURN server connectivity...');
+        
+        const testServers = [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun.stunprotocol.org:3478' },
+            { urls: 'stun:global.stun.twilio.com:3478' }
+        ];
+        
+        for (const server of testServers) {
+            try {
+                const testPc = new RTCPeerConnection({ iceServers: [server] });
+                
+                const testPromise = new Promise((resolve, reject) => {
+                    const timeout = setTimeout(() => {
+                        testPc.close();
+                        reject(new Error('timeout'));
+                    }, 5000);
+                    
+                    testPc.onicecandidate = (event) => {
+                        if (event.candidate) {
+                            clearTimeout(timeout);
+                            testPc.close();
+                            resolve(event.candidate);
+                        }
+                    };
+                    
+                    testPc.onicegatheringstatechange = () => {
+                        if (testPc.iceGatheringState === 'complete') {
+                            clearTimeout(timeout);
+                            testPc.close();
+                            resolve('complete');
+                        }
+                    };
+                });
+                
+                // Create a data channel to trigger ICE gathering
+                testPc.createDataChannel('test');
+                const offer = await testPc.createOffer();
+                await testPc.setLocalDescription(offer);
+                
+                const result = await testPromise;
+                console.log(`✅ STUN server ${server.urls} is reachable:`, result);
+            } catch (error) {
+                console.error(`❌ STUN server ${server.urls} failed:`, error.message);
+            }
+        }
+    }, []);
+
     // Callback for handling WebRTC signaling messages
     const handleWebRTCSignaling = useCallback(async (data, myCode, targetPeerCode, currentPeerConnectionRef, currentWs) => {
         if (!currentPeerConnectionRef.current) {
@@ -356,25 +453,44 @@ function App() {
                 }
 
                 if (data.type === 'webrtc_offer') {
-                    // If it was an offer, create and send an answer
-                    const answer = await currentPeerConnectionRef.current.createAnswer();
-                    await currentPeerConnectionRef.current.setLocalDescription(answer);
-                    if (currentWs && currentWs.readyState === WebSocket.OPEN) {
-                        currentWs.send(JSON.stringify({
-                            type: 'webrtc_answer',
-                            sdp: currentPeerConnectionRef.current.localDescription,
-                            toCode: targetPeerCode, // Send answer back to the *sender* of the offer
-                            fromCode: myCode
-                        }));
+                    console.log('Processing WebRTC offer from peer:', targetPeerCode);
+                    console.log('WebRTC offer SDP:', data.sdp);
+                    
+                    try {
+                        // If it was an offer, create and send an answer
+                        const answer = await currentPeerConnectionRef.current.createAnswer();
+                        await currentPeerConnectionRef.current.setLocalDescription(answer);
+                        
+                        console.log('Created WebRTC answer SDP:', answer);
+                        
+                        if (currentWs && currentWs.readyState === WebSocket.OPEN) {
+                            currentWs.send(JSON.stringify({
+                                type: 'webrtc_answer',
+                                sdp: currentPeerConnectionRef.current.localDescription,
+                                toCode: targetPeerCode, // Send answer back to the *sender* of the offer
+                                fromCode: myCode
+                            }));
+                            console.log('Sent WebRTC answer to peer:', targetPeerCode);
+                        } else {
+                            console.error('WebSocket not available to send answer');
+                        }
+                    } catch (error) {
+                        console.error('Error processing WebRTC offer:', error);
                     }
                 }
             } else if (data.candidate) { // This is an ICE candidate
-                if (currentPeerConnectionRef.current.remoteDescription) {
-                    console.log('Adding ICE candidate:', data.candidate);
-                    await currentPeerConnectionRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
-                } else {
-                    console.log('Queueing ICE candidate (remote description not set yet):', data.candidate);
-                    iceCandidatesQueueRef.current.push(data.candidate);
+                try {
+                    if (currentPeerConnectionRef.current.remoteDescription) {
+                        console.log('Adding ICE candidate:', data.candidate);
+                        await currentPeerConnectionRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
+                        console.log('Successfully added ICE candidate');
+                    } else {
+                        console.log('Queueing ICE candidate (remote description not set yet):', data.candidate);
+                        iceCandidatesQueueRef.current.push(data.candidate);
+                    }
+                } catch (error) {
+                    console.error('Error adding ICE candidate:', error);
+                    // Don't fail the entire connection for one bad candidate
                 }
             }
         } catch (error) {
@@ -383,9 +499,50 @@ function App() {
         }
     }, []); // Empty dependency array as all needed variables are passed as arguments or are refs
 
+    // Function to monitor WebRTC connection state
+    const monitorConnection = useCallback((peerConnection, myCode, targetPeerCode) => {
+        console.log('🔍 Starting connection monitoring for', { myCode, targetPeerCode });
+        
+        const startTime = Date.now();
+        const monitor = setInterval(() => {
+            const elapsed = (Date.now() - startTime) / 1000;
+            const connectionState = peerConnection.connectionState;
+            const iceConnectionState = peerConnection.iceConnectionState;
+            const iceGatheringState = peerConnection.iceGatheringState;
+            
+            console.log(`📊 Connection Monitor [${elapsed.toFixed(1)}s]:`, {
+                connection: connectionState,
+                iceConnection: iceConnectionState,
+                iceGathering: iceGatheringState,
+                signaling: peerConnection.signalingState
+            });
+            
+            // Clear monitor after successful connection or timeout
+            if (connectionState === 'connected' || 
+                connectionState === 'failed' || 
+                connectionState === 'closed' ||
+                elapsed > 30) {
+                clearInterval(monitor);
+                console.log('🔍 Connection monitoring ended:', connectionState);
+            }
+        }, 2000); // Check every 2 seconds
+        
+        return monitor;
+    }, []);
+
     // Callback for setting up WebRTC connection
     const setupWebRTC = useCallback(async (socket, isReceiver, myCode, targetPeerCode) => {
         console.log("🧠 setupWebRTC called", { isReceiver, myCode, targetPeerCode });
+        
+        // Log network and environment information for debugging
+        console.log('🌐 Environment info:', {
+            hostname: window.location.hostname,
+            protocol: window.location.protocol,
+            userAgent: navigator.userAgent,
+            environment: process.env.NODE_ENV || 'development',
+            connectionType: navigator.connection?.effectiveType || 'unknown',
+            onLine: navigator.onLine
+        });
         
         // Close any existing peer connection before setting up a new one
         if (peerConnectionRef.current) {
@@ -411,7 +568,30 @@ function App() {
                 { urls: 'stun:stun.voiparound.com' },
                 { urls: 'stun:stun.voipbuster.com' },
                 
-                // TURN servers (for NAT traversal) - Multiple providers for redundancy
+                // Production-specific TURN servers for better reliability
+                ...(process.env.NODE_ENV === 'production' ? [
+                    // Twillio's free STUN servers (more reliable for production)
+                    { urls: 'stun:global.stun.twilio.com:3478' },
+                    
+                    // Additional free TURN servers for production
+                    {
+                        urls: 'turn:numb.viagenie.ca',
+                        username: 'webrtc@live.com',
+                        credential: 'muazkh'
+                    },
+                    {
+                        urls: 'turn:192.158.29.39:3478?transport=udp',
+                        username: '28224511:1379330808',
+                        credential: 'JZEOEt2V3Qb0y27GRntt2u2PAYA='
+                    },
+                    {
+                        urls: 'turn:192.158.29.39:3478?transport=tcp',
+                        username: '28224511:1379330808',
+                        credential: 'JZEOEt2V3Qb0y27GRntt2u2PAYA='
+                    }
+                ] : []),
+                
+                // OpenRelay TURN servers (fallback)
                 {
                     urls: 'turn:openrelay.metered.ca:80',
                     username: 'openrelayproject',
@@ -432,7 +612,6 @@ function App() {
                     username: 'openrelayproject',
                     credential: 'openrelayproject'
                 },
-                // Additional TURN servers for better reliability
                 {
                     urls: 'turns:openrelay.metered.ca:443',
                     username: 'openrelayproject',
@@ -444,12 +623,23 @@ function App() {
                     credential: 'openrelayproject'
                 }
             ],
-            // Additional configuration for better connectivity
-            iceCandidatePoolSize: 10,
+            // Enhanced configuration for production environments
+            iceCandidatePoolSize: process.env.NODE_ENV === 'production' ? 20 : 10,
             bundlePolicy: 'max-bundle',
-            rtcpMuxPolicy: 'require'
+            rtcpMuxPolicy: 'require',
+            iceTransportPolicy: 'all' // Allow both STUN and TURN
         });
         peerConnectionRef.current = peerConnection;
+        
+        // Start connection monitoring
+        const connectionMonitor = monitorConnection(peerConnection, myCode, targetPeerCode);
+        
+        // Test STUN/TURN connectivity in production environments
+        if (process.env.NODE_ENV === 'production' || window.location.hostname !== 'localhost') {
+            testSTUNTURNConnectivity().catch(err => {
+                console.warn('STUN/TURN connectivity test failed:', err);
+            });
+        }
         
         // Enhanced connection state monitoring
         peerConnection.onconnectionstatechange = () => {
@@ -502,6 +692,49 @@ function App() {
                 console.log('🧊 ICE gathering complete - all candidates sent');
             }
         };
+
+        // Function to provide helpful debugging information
+        const logConnectionDiagnostics = () => {
+            console.log('🔧 WebRTC Connection Diagnostics:');
+            console.log('- Signaling State:', peerConnection.signalingState);
+            console.log('- Connection State:', peerConnection.connectionState);
+            console.log('- ICE Connection State:', peerConnection.iceConnectionState);
+            console.log('- ICE Gathering State:', peerConnection.iceGatheringState);
+            console.log('- Local Description:', peerConnection.localDescription ? 'Set' : 'Not set');
+            console.log('- Remote Description:', peerConnection.remoteDescription ? 'Set' : 'Not set');
+            console.log('- Data Channel State:', dataChannelRef.current?.readyState || 'No channel');
+            
+            // Get and log ICE candidates
+            peerConnection.getStats().then(stats => {
+                const candidates = [];
+                stats.forEach(report => {
+                    if (report.type === 'local-candidate' || report.type === 'remote-candidate') {
+                        candidates.push({
+                            type: report.type,
+                            candidateType: report.candidateType,
+                            protocol: report.protocol,
+                            address: report.address,
+                            port: report.port
+                        });
+                    }
+                });
+                console.log('🧊 ICE Candidates:', candidates);
+            }).catch(err => console.warn('Could not get WebRTC stats:', err));
+        };
+        
+        // Log diagnostics periodically
+        const diagnosticsInterval = setInterval(logConnectionDiagnostics, 10000); // Every 10 seconds
+        
+        // Clear diagnostics when connection is established or fails
+        const clearDiagnostics = () => clearInterval(diagnosticsInterval);
+        
+        peerConnection.addEventListener('connectionstatechange', () => {
+            if (peerConnection.connectionState === 'connected' || 
+                peerConnection.connectionState === 'failed' ||
+                peerConnection.connectionState === 'closed') {
+                clearDiagnostics();
+            }
+        });
 
         // --- Data Channel handling ---
         if (!isReceiver) {
@@ -623,16 +856,50 @@ function App() {
 
     // --- WebSocket and Connection Management ---
     useEffect(() => {
-        const wsUrl = process.env.NODE_ENV === 'production'
-        ? `wss://${window.location.host}` // Use secure 'wss' for production
-        : 'ws://localhost:8080';       // Keep 'ws' for local development
+        // Enhanced WebSocket URL configuration for production reliability
+        let wsUrl;
+        if (process.env.NODE_ENV === 'production') {
+            // For Render.com and other production deployments
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const host = window.location.host;
+            wsUrl = `${protocol}//${host}`;
+            console.log('🌐 Production WebSocket URL:', wsUrl);
+        } else {
+            // Local development
+            wsUrl = 'ws://localhost:8080';
+            console.log('🏠 Development WebSocket URL:', wsUrl);
+        }
 
+        console.log('🔗 Attempting WebSocket connection to:', wsUrl);
+        console.log('🌍 Environment:', process.env.NODE_ENV);
+        console.log('🔒 Protocol:', window.location.protocol);
+        console.log('🏠 Host:', window.location.host);
+        console.log('📍 Origin:', window.location.origin);
+        
         const socket = new WebSocket(wsUrl);
+        
+        // Add connection timeout
+        const connectionTimeout = setTimeout(() => {
+            if (socket.readyState !== WebSocket.OPEN) {
+                console.error('⏰ WebSocket connection timeout');
+                socket.close();
+                setConnectionStatus('Connection Timeout');
+                setStatusMessage('Connection to server timed out. Please refresh and try again.');
+            }
+        }, 10000); // 10 second timeout
 
         socket.onopen = async () => {
-            console.log('Connected to WebSocket signaling server.');
+            clearTimeout(connectionTimeout);
+            console.log('✅ Connected to WebSocket signaling server.');
+            console.log('🔗 WebSocket ready state:', socket.readyState);
+            console.log('🌐 WebSocket URL used:', socket.url);
             setConnectionStatus('Connected to Signaling Server');
             setStatusMessage('Generating keys and unique code...');
+
+            // Test ICE connectivity in production
+            if (process.env.NODE_ENV === 'production') {
+                testICEConnectivity();
+            }
 
             // Generate our session key pair
             const kp = await generateSessionKeyPair();
@@ -849,16 +1116,44 @@ function App() {
             }
         };
 
-        socket.onclose = () => {
-            console.log('Disconnected from WebSocket signaling server.');
+        socket.onclose = (event) => {
+            clearTimeout(connectionTimeout);
+            console.log('❌ Disconnected from WebSocket signaling server.');
+            console.log('🔍 Close code:', event.code);
+            console.log('🔍 Close reason:', event.reason);
+            console.log('🔍 Was clean:', event.wasClean);
             setConnectionStatus('Disconnected');
-            setStatusMessage('Connection lost. Please refresh to start a new secure session.');
+            
+            // Provide specific error messages based on close codes
+            if (event.code === 1006) {
+                setStatusMessage('Connection lost unexpectedly. Server may be down. Please refresh.');
+            } else if (event.code === 1000) {
+                setStatusMessage('Connection closed normally. Please refresh to start a new session.');
+            } else {
+                setStatusMessage(`Connection lost (Code: ${event.code}). Please refresh to start a new secure session.`);
+            }
         };
 
         socket.onerror = error => {
-            console.error('WebSocket error:', error);
-            setConnectionStatus('Error');
-            setStatusMessage(`WebSocket Error: ${error.message}`);
+            clearTimeout(connectionTimeout);
+            console.error('🚨 WebSocket error:', error);
+            console.error('🚨 WebSocket readyState:', socket.readyState);
+            console.error('🚨 Current URL:', wsUrl);
+            console.error('🚨 Event type:', error.type);
+            
+            setConnectionStatus('Connection Error');
+            
+            if (process.env.NODE_ENV === 'production') {
+                setStatusMessage(`❌ Connection failed to server. Please refresh and try again.`);
+                
+                // Additional production debugging info
+                console.error('🌐 Production environment detected');
+                console.error('🌐 Protocol:', window.location.protocol);
+                console.error('🌐 Host:', window.location.host);
+                console.error('🌐 Full URL:', window.location.href);
+            } else {
+                setStatusMessage(`❌ WebSocket Error: ${error.message || 'Connection failed'}`);
+            }
         };
 
         setWs(socket);

@@ -8,9 +8,20 @@ const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
+
+// Enhanced WebSocket server configuration for production
+const wss = new WebSocket.Server({ 
+    server,
+    perMessageDeflate: false,
+    clientTracking: true,
+    maxPayload: 100 * 1024 * 1024 // 100MB for file transfers
+});
 
 const PORT = process.env.PORT || 8080;
+
+console.log('🚀 Server starting...');
+console.log('🌍 Environment:', process.env.NODE_ENV || 'development');
+console.log('🔌 Port:', PORT);
 
 // Serve the static files from the React app's build directory
 app.use(express.static(path.join(__dirname, '../../frontend/build')));
@@ -24,13 +35,19 @@ app.get('*', (req, res) =>{
 const clients = new Map(); // Map: code -> WebSocket instance
 
 // --- WebSocket connection handling ---
-wss.on('connection', ws => {
-    console.log('Client connected to WebSocket.');
-    console.log('🧠 New client connected to WebSocket.');
+wss.on('connection', (ws, req) => {
+    const clientIP = req.socket.remoteAddress;
+    const userAgent = req.headers['user-agent'];
+    
+    console.log('🔗 WebSocket connection established');
+    console.log('📍 Client IP:', clientIP);
+    console.log('🌐 User Agent:', userAgent);
+    console.log('🔗 Origin:', req.headers.origin);
+    console.log('📊 Total active connections:', wss.clients.size);
 
     // Assign a temporary ID for this client
     ws.id = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    console.log(`Assigned temp ID: ${ws.id}`);
+    console.log(`🆔 Assigned temp ID: ${ws.id}`);
 
     ws.on('message', message => {
         try {
@@ -96,28 +113,64 @@ wss.on('connection', ws => {
         }
     });
 
-    ws.on('close', () => {
-        console.log(`Client ${ws.code || ws.id} disconnected.`);
+    ws.on('close', (code, reason) => {
+        console.log(`💀 WebSocket closed - Client ${ws.code || ws.id}`);
+        console.log(`💀 Close code: ${code}, reason: ${reason}`);
+        console.log(`📊 Remaining connections: ${wss.clients.size - 1}`);
+        
         // Don't remove it instantly. Let it timeout naturally.
         // Optionally: Set a short-lived cleanup timeout
         if (ws.code && clients.has(ws.code)) {
-            console.log(`Client ${ws.code} marked as disconnected — keeping for 10s just in case`);
+            console.log(`⏱️ Client ${ws.code} marked as disconnected — keeping for 10s just in case`);
             setTimeout(() => {
                 if (clients.get(ws.code) === ws) {
                     clients.delete(ws.code);
-                    console.log(`Client ${ws.code} fully removed after timeout.`);
+                    console.log(`🗑️ Client ${ws.code} fully removed after timeout.`);
                 }
             }, 10_000); // 10 seconds grace period
         }
     });
 
-    ws.on('error', error => {
-        console.error('WebSocket error:', error);
+    ws.on('error', (error) => {
+        console.error(`🚨 WebSocket error for client ${ws.code || ws.id}:`, error);
+        console.error(`🚨 Error details:`, {
+            message: error.message,
+            code: error.code,
+            stack: error.stack
+        });
+    });
+});
+
+// Health check endpoint for production monitoring
+app.get('/health', (req, res) => {
+    res.json({ 
+        status: 'healthy', 
+        timestamp: new Date().toISOString(),
+        connections: wss.clients.size,
+        activeClients: clients.size,
+        environment: process.env.NODE_ENV || 'development'
+    });
+});
+
+// WebSocket status endpoint
+app.get('/ws-status', (req, res) => {
+    res.json({
+        websocketServer: 'running',
+        totalConnections: wss.clients.size,
+        activeClients: clients.size,
+        clientCodes: Array.from(clients.keys())
     });
 });
 
 // Start the server
 server.listen(PORT, () => {
-    console.log(`NYX Backend server listening on port ${PORT}`);
-    console.log(`Serving static files from: ${path.join(__dirname, '../public')}`);
+    console.log(`🚀 NYX Backend server listening on port ${PORT}`);
+    console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`🔗 WebSocket server ready for connections`);
+    console.log(`📊 Health check: http://localhost:${PORT}/health`);
+    console.log(`📊 WS Status: http://localhost:${PORT}/ws-status`);
+    
+    if (process.env.NODE_ENV === 'production') {
+        console.log('🌐 Production mode - serving React build from:', path.join(__dirname, '../../frontend/build'));
+    }
 });
