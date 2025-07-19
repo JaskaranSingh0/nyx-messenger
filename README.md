@@ -28,14 +28,27 @@ A secure, end-to-end encrypted messenger with peer-to-peer communication, featur
 - **Code Validity Timer**: 60-second countdown timer for connection codes
 - **Visual Feedback**: Comprehensive status indicators and notifications
 
+### ⚙️ Technical Excellence
+- **Modular Architecture**: Clean separation between container and presentational components
+- **Maintainable Codebase**: Centralized state management with isolated UI components
+- **Modern React Patterns**: Hooks-based architecture with optimal performance
+- **Type Safety**: Structured prop passing and component contracts
+
 ## 🏗️ Architecture
 
 ```
 NYX Messenger
 ├── 🎨 Frontend (React 18.2.0)
-│   ├── WebRTC Peer Connections
-│   ├── Crypto API Integration
-│   ├── Real-time UI Updates
+│   ├── App.js (Container Component)
+│   │   ├── All State Management
+│   │   ├── WebSocket & WebRTC Logic
+│   │   ├── Encryption/Decryption
+│   │   └── Event Handlers
+│   ├── /components (Presentational)
+│   │   ├── ConnectionManager.js
+│   │   ├── VerificationPrompt.js
+│   │   └── ChatInterface.js
+│   ├── cryptoUtils.js
 │   └── Cyberpunk Interface
 ├── 🔧 Backend (Node.js + Express)
 │   ├── WebSocket Signaling Server
@@ -91,6 +104,26 @@ cd frontend
 npm start
 ```
 
+### Project Structure
+
+```
+frontend/src/
+├── App.js                    # Container component with all logic
+├── App.css                   # Global styles and animations
+├── cryptoUtils.js           # Encryption/decryption utilities
+├── index.js                 # React app entry point
+└── components/              # Presentational components
+    ├── ConnectionManager.js  # Initial connection interface
+    ├── VerificationPrompt.js # SAS verification step
+    └── ChatInterface.js      # Main messaging interface
+```
+
+#### **For Developers**
+- **All state and logic** remains in `App.js` (container pattern)
+- **Components** are purely presentational and receive data via props
+- **No state management** within individual components
+- **Easy to extend**: Add new components or modify existing ones without touching core logic
+
 ## 📖 How to Use
 
 ### Starting a Session
@@ -122,6 +155,43 @@ npm start
 - **Web Crypto API**: Browser-native cryptographic operations
 - **WebRTC**: Direct peer-to-peer communication
 - **React Icons**: Comprehensive icon library
+
+### Frontend Architecture
+NYX Messenger follows a **Container/Presentational component pattern** for optimal maintainability:
+
+#### **Container Component**
+- **`App.js`**: Central hub containing all application logic
+  - State management (useState, useRef hooks)
+  - WebSocket and WebRTC connection handling
+  - Encryption/decryption operations
+  - Event handlers and business logic
+  - Acts as single source of truth for app state
+
+#### **Presentational Components**
+- **`ConnectionManager.js`**: Initial connection UI
+  - Code generation and display
+  - Peer code input interface
+  - Copy-to-clipboard functionality
+  - Renders when `!sharedSecret`
+
+- **`VerificationPrompt.js`**: Security verification step
+  - Short Authentication String (SAS) display
+  - Verification buttons (Yes/No)
+  - Renders when `sharedSecret && !isVerified`
+
+- **`ChatInterface.js`**: Main messaging interface
+  - Message list with animations
+  - Typing indicators
+  - Message input and file sharing
+  - Ephemeral file display
+  - Renders when `sharedSecret && isVerified`
+
+#### **Benefits of This Architecture**
+- **Separation of Concerns**: Logic separated from presentation
+- **Maintainability**: Easier to modify and debug components
+- **Reusability**: Components can be easily replaced or extended
+- **Testability**: Isolated components easier to unit test
+- **State Management**: Centralized state prevents prop drilling issues
 
 ### Backend Stack
 - **Node.js + Express**: Lightweight server framework
@@ -197,12 +267,19 @@ NYX Messenger is designed for secure communication but should not be used for se
 
 ## 🔮 Future Enhancements
 
+### 🎯 Planned Features
 - [ ] Group messaging support
 - [ ] Voice/video calling integration
 - [ ] Mobile app development
 - [ ] Advanced file encryption
 - [ ] Custom themes and personalization
 - [ ] Message threading and organization
+
+### ✅ Recent Improvements
+- [x] **Component Architecture Refactor** (Latest): Restructured codebase into maintainable, reusable components
+- [x] **Container/Presentational Pattern**: Separated business logic from UI presentation
+- [x] **Code Validity Timer**: Added 60-second countdown for connection codes
+- [x] **Enhanced Error Handling**: Improved connection state management and user feedback
 
 ---
 
