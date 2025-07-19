@@ -68,10 +68,58 @@ function App() {
     //message queue
     const [queuedEncryptedMessages, setQueuedEncryptedMessages] = useState([]);
 
+    // Timer state for showing code validity countdown
+    const [codeValidityTime, setCodeValidityTime] = useState(0);
+    const [isCodeActive, setIsCodeActive] = useState(false);
+    const validityTimerRef = useRef(null);
+
     // WebRTC refs
     const peerConnectionRef = useRef(null);
     const dataChannelRef = useRef(null);
     const iceCandidatesQueueRef = useRef([]);
+
+    // ===================================================================
+    // Helper Functions
+    // ===================================================================
+    // Format code validity time for display
+    const formatValidityTime = (seconds) => {
+        if (seconds <= 0) return "00:00";
+        
+        const minutes = Math.floor(seconds / 60);
+        const secs = seconds % 60;
+        return `${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    };
+
+    // Start code validity countdown timer
+    const startCodeValidityTimer = () => {
+        setCodeValidityTime(60); // 60 seconds validity
+        setIsCodeActive(true);
+        
+        if (validityTimerRef.current) {
+            clearInterval(validityTimerRef.current);
+        }
+        
+        validityTimerRef.current = setInterval(() => {
+            setCodeValidityTime(prev => {
+                if (prev <= 1) {
+                    setIsCodeActive(false);
+                    clearInterval(validityTimerRef.current);
+                    return 0;
+                }
+                return prev - 1;
+            });
+        }, 1000);
+    };
+
+    // Stop code validity timer
+    const stopCodeValidityTimer = () => {
+        if (validityTimerRef.current) {
+            clearInterval(validityTimerRef.current);
+            validityTimerRef.current = null;
+        }
+        setCodeValidityTime(0);
+        setIsCodeActive(false);
+    };
 
     // ===================================================================
     // 2. All useCallback hooks SECOND
@@ -411,11 +459,23 @@ function App() {
         setIsPeerTyping(false);
         setConnectionStatus('Disconnected');
         setStatusMessage(message || 'Session terminated. Please refresh to start a new session.');
+        
+        // Stop the validity timer
+        stopCodeValidityTimer();
     }, []); // Empty dependency array is correct here.
 
     // ===================================================================
     // 3. All useEffect hooks THIRD
     // ===================================================================
+    // Cleanup validity timer on unmount
+    useEffect(() => {
+        return () => {
+            if (validityTimerRef.current) {
+                clearInterval(validityTimerRef.current);
+            }
+        };
+    }, []);
+
     // Handle page unload for debugging
     useEffect(() => {
         const handleBeforeUnload = (e) => {
@@ -462,11 +522,15 @@ function App() {
             }
             setStatusMessage(`Your ephemeral code is: ${code}. Share it with your peer.`);
 
+            // Start the validity countdown timer
+            startCodeValidityTimer();
+
             // Set a timer for the code to expire (on client-side)
             setTimeout(() => {
                 setMyConnectionCode(currentCode => {
                     if (currentCode === code) { // Only expire if it's still the active code
                         setStatusMessage('Connection code expired. Generate a new one to invite a peer.');
+                        stopCodeValidityTimer(); // Stop the countdown timer
                         return '';
                     }
                     return currentCode; // Keep current code if it's different
@@ -532,6 +596,9 @@ function App() {
                         setStatusMessage('Shared secret derived. Secure session active! Waiting for peer to start direct connection...');
                         setConnectionStatus('Secure Session Active');
                         
+                        // Stop the code validity timer since connection is established
+                        stopCodeValidityTimer();
+                        
                         // THE FIX: We DO NOT call setupWebRTC here. The receiver waits for the 'webrtc_offer'.
 
                     } catch (error) {
@@ -569,6 +636,10 @@ function App() {
 
                         setStatusMessage('Shared secret derived. Secure session established! Setting up WebRTC...');
                         setConnectionStatus('Secure Session Active');
+                        
+                        // Stop the code validity timer since connection is established
+                        stopCodeValidityTimer();
+                        
                         // Pass explicit current codes to setupWebRTC
                         setTimeout(() => {
                             setupWebRTC(socket, false, currentMyCode, currentPeerCode);
@@ -738,6 +809,10 @@ function App() {
         myConnectionCodeRef.current = code; // Update ref
 
         setStatusMessage(`Share this code: ${code}. Valid for 60 seconds. Awaiting peer connection...`);
+        
+        // Start the validity countdown timer
+        startCodeValidityTimer();
+        
         // Register our code with the server
         if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({ type: 'register_code', code: code }));
@@ -748,6 +823,7 @@ function App() {
             setMyConnectionCode(currentCode => {
                 if (currentCode === code) { // Only expire if it's still the active code
                     setStatusMessage('Connection code expired. Generate a new one to invite a peer.');
+                    stopCodeValidityTimer(); // Stop the countdown timer
                     return '';
                 }
                 return currentCode;
@@ -1070,6 +1146,16 @@ function App() {
                         {' '}Status: {connectionStatus}
                     </p>
                     <p>{statusMessage}</p>
+                    {isCodeActive && (
+                        <motion.p 
+                            className={`validity-timer ${codeValidityTime <= 10 ? 'timer-warning' : ''}`}
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            transition={{ duration: 0.5, delay: 0.6 }}
+                        >
+                            ⏱️ Code Valid: {formatValidityTime(codeValidityTime)}
+                        </motion.p>
+                    )}
                 </motion.div>
 
                 <AnimatePresence mode="wait">

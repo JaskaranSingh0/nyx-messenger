@@ -186,6 +186,46 @@ body {
   letter-spacing: 2px;
 }
 
+.validity-timer {
+  color: var(--success) !important;
+  font-weight: 600 !important;
+  font-size: 1.2rem !important;
+  text-shadow: 0 0 10px var(--success) !important;
+  background: rgba(0, 255, 65, 0.1);
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 255, 65, 0.3);
+  margin-top: 10px !important;
+  display: inline-block;
+  animation: timerPulse 2s ease-in-out infinite alternate;
+}
+
+.timer-warning {
+  color: var(--warning) !important;
+  text-shadow: 0 0 10px var(--warning) !important;
+  background: rgba(255, 170, 0, 0.1) !important;
+  border: 1px solid rgba(255, 170, 0, 0.3) !important;
+  animation: warningPulse 0.5s ease-in-out infinite alternate !important;
+}
+
+@keyframes timerPulse {
+  from { 
+    box-shadow: 0 0 5px rgba(0, 255, 65, 0.3); 
+  }
+  to { 
+    box-shadow: 0 0 15px rgba(0, 255, 65, 0.6), 0 0 25px rgba(0, 255, 65, 0.3); 
+  }
+}
+
+@keyframes warningPulse {
+  from { 
+    box-shadow: 0 0 10px rgba(255, 170, 0, 0.5); 
+  }
+  to { 
+    box-shadow: 0 0 20px rgba(255, 170, 0, 0.8), 0 0 30px rgba(255, 170, 0, 0.4); 
+  }
+}
+
 .connection-section, .chat-section {
   width: 100%;
   padding: 30px;
