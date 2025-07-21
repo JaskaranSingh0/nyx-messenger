@@ -27,7 +27,7 @@ console.log('🔌 Port:', PORT);
 app.use(express.static(path.join(__dirname, '../../frontend/build')));
 
 // Handles any requests that don't match the ones above
-app.get('*', (req, res) =>{
+app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, '../../frontend/build/index.html'));
 });
 
@@ -46,7 +46,7 @@ wss.on('connection', (ws, req) => {
     console.log('📊 Total active connections:', wss.clients.size);
 
     // Assign a temporary ID for this client
-    ws.id = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    ws.id = `temp_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
     console.log(`🆔 Assigned temp ID: ${ws.id}`);
 
     ws.on('message', message => {

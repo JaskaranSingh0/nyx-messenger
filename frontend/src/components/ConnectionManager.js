@@ -85,6 +85,12 @@ const ConnectionManager = ({
                     value={inputConnectionCode}
                     onChange={e => setInputConnectionCode(e.target.value)}
                     placeholder="Enter peer's code to connect"
+                    inputMode="text"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="characters"
+                    spellCheck="false"
+                    maxLength="8"
                 />
                 <motion.button 
                     type="button" 

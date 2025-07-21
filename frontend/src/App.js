@@ -1441,7 +1441,7 @@ function App() {
         setTransferringFile(true);
 
         const CHUNK_SIZE = 64 * 1024; // 64 KB chunks
-        const fileId = `file_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const fileId = `file_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
         const totalChunks = Math.ceil(fileToShare.size / CHUNK_SIZE);
         
         console.log(`Preparing to send ${fileToShare.name} (${fileToShare.size} bytes) in ${totalChunks} chunks.`);

@@ -646,6 +646,10 @@ p {
 
 /* Responsive Design */
 @media (max-width: 768px) {
+  .App {
+    padding: 10px;
+  }
+  
   .App-header {
     padding: 20px;
     margin: 10px;
@@ -662,20 +666,74 @@ p {
   
   .message-input {
     flex-direction: column;
+    gap: 15px;
   }
   
   .message-input input {
-    margin-bottom: 10px;
+    margin-bottom: 0;
+    padding: 18px; /* Larger touch target */
+    font-size: 16px; /* Prevent zoom on iOS */
   }
   
   .file-controls {
     flex-direction: column;
     align-items: stretch;
+    gap: 10px;
   }
   
   .verification-buttons {
     flex-direction: column;
     gap: 15px;
+  }
+  
+  /* Ensure minimum touch target size */
+  button {
+    min-height: 44px;
+    padding: 18px 25px;
+    font-size: 14px;
+  }
+  
+  /* Optimize animations for mobile performance */
+  .circuit-lines,
+  .floating-particles {
+    animation-duration: 40s; /* Slower animations */
+  }
+  
+  /* Reduce backdrop blur on mobile for performance */
+  .App-header,
+  .connection-section,
+  .chat-section {
+    backdrop-filter: blur(5px);
+    -webkit-backdrop-filter: blur(5px);
+  }
+}
+
+/* Mobile-specific optimizations */
+@media (max-width: 480px) {
+  .App-header h1 {
+    font-size: 1.5rem;
+  }
+  
+  .code-display code {
+    font-size: 1.2rem;
+    letter-spacing: 2px;
+  }
+  
+  .message-list {
+    max-height: 300px;
+  }
+}
+
+/* Touch device optimizations */
+@media (hover: none) and (pointer: coarse) {
+  button:hover {
+    transform: none; /* Remove hover effects on touch devices */
+  }
+  
+  /* Improve touch feedback */
+  button:active {
+    transform: scale(0.95);
+    transition: transform 0.1s ease;
   }
 }
 

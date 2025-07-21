@@ -1,70 +1,124 @@
 # 🌐 NYX Messenger
 
-A secure, end-to-end encrypted messenger with peer-to-peer communication, featuring ephemeral messaging and a cyberpunk-inspired interface. NYX Messenger
+> A secure, end-to-end encrypted messenger featuring peer-to-peer communication, ephemeral messaging, and a cyberpunk-inspired interface.
 
+**🔗 Live Demo:** [https://ny## 🔐 Security
 
-**🔗 Live Demo:** [https://nyx-messenger.onrender.com/](https://nyx-messenger.onrender.com/)
+### Cryptographic Implementationessenger.onrender.com/](https://nyx-messenger.onrender.com/)
+
+[![License: ISC](https://img.shi## 📊 Project Status
+
+**Current Version:** 1.0.0s.io/badge/License-ISC-blue.svg)](https://opensource.org/licenses/ISC)
+[![React](https://img.shields.io/badge/React-18.2.0-61dafb.svg)](https://reactjs.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-16+-339933.svg)](https://nodejs.org/)
+[![WebRTC](https://img.shields.io/badge/WebRTC-P2P-orange.svg)](https://webrtc.org/)
+[![Security](https://img.shields.io/badge/Security-E2E%20Encrypted-green.svg)](https://github.com/JaskaranSingh0/nyx-messenger)
+[![PWA Ready](https://img.shields.io/badge/PWA-Ready-green.svg)](https://web.dev/progressive-web-apps/)
+
+## 📖 Table of Contents
+
+- [Features](#-features)
+- [Quick Start](#-quick-start)
+- [Architecture](#️-architecture)
+- [Usage Guide](#-usage-guide)
+- [Security](#-security)
+- [Development](#-development)
+- [Deployment](#-deployment)
+- [Contributing](#-contributing)
+- [License](#-license)
 
 ## 🌟 Features
 
 ### 🔒 Security & Privacy
-- **End-to-End Encryption**: ECDH P-256 key exchange with AES-256-GCM encryption
-- **Ephemeral Messaging**: Messages disappear after being read (view-once functionality)
-- **Short Authentication String (SAS)**: Verify connection integrity with cryptographic hashes
-- **No Data Persistence**: Messages are never stored on servers
-- **Peer-to-Peer Communication**: Direct WebRTC connections bypass central servers
+- **End-to-End Encryption** - ECDH P-256 key exchange with AES-256-GCM encryption
+- **Ephemeral Messaging** - Messages disappear after being read (view-once functionality)
+- **Short Authentication String (SAS)** - Cryptographic verification prevents MITM attacks
+- **No Data Persistence** - Messages are never stored on servers
+- **Memory Protection** - Secure key cleanup with zero-fill operations
+- **Peer-to-Peer Communication** - Direct WebRTC connections bypass central servers
 
-### 💬 Messaging Features
-- **Real-time Communication**: Instant message delivery via WebRTC data channels
-- **File Sharing**: Send files with ephemeral view-once functionality
-- **Typing Indicators**: See when your peer is typing
-- **Connection Status**: Real-time connection state monitoring
-- **Auto-reconnection**: Automatic reconnection handling with backoff strategy
+### 💬 Messaging
+- **Real-time Communication** - Instant message delivery via WebRTC data channels
+- **File Sharing** - Send files with ephemeral view-once functionality (up to 100MB)
+- **Typing Indicators** - See when your peer is typing in real-time
+- **Auto-reconnection** - Automatic reconnection handling with backoff strategy
+- **Message Queuing** - Queued message delivery when connections are re-established
+- **Audio Notifications** - Sound alerts for incoming messages
+- **Server Relay Fallback** - Messages continue via server when P2P fails
 
 ### 🎨 User Experience
-- **Cyberpunk Theme**: Futuristic dark interface with neon accents
-- **Smooth Animations**: Powered by Framer Motion for fluid interactions
-- **Responsive Design**: Works seamlessly on desktop and mobile devices
-- **Code Validity Timer**: 60-second countdown timer for connection codes
-- **Visual Feedback**: Comprehensive status indicators and notifications
+- **Cyberpunk Theme** - Futuristic dark interface with neon accents and smooth animations
+- **Responsive Design** - Works seamlessly on desktop and mobile devices
+- **Progressive Web App** - PWA support with offline capabilities
+- **Code Validity Timer** - 60-second countdown timer for connection codes
+- **Visual Feedback** - Comprehensive status indicators and notifications
+- **Copy-to-Clipboard** - Easy code sharing with one-click copy functionality
 
 ### ⚙️ Technical Excellence
-- **Modular Architecture**: Clean separation between container and presentational components
-- **Maintainable Codebase**: Centralized state management with isolated UI components
-- **Modern React Patterns**: Hooks-based architecture with optimal performance
-- **Type Safety**: Structured prop passing and component contracts
+- **Modular Architecture** - Clean separation between container and presentational components
+- **Modern React Patterns** - Hooks-based architecture with optimal performance
+- **Production Monitoring** - Health checks and connection analytics
+- **Enhanced Connectivity** - Multiple STUN/TURN servers for improved NAT traversal
 
 ## 🏗️ Architecture
 
+NYX Messenger uses a modern, security-first architecture with clean component separation:
+
 ```
-NYX Messenger
-├── 🎨 Frontend (React 18.2.0)
-│   ├── App.js (Container Component)
-│   │   ├── All State Management
-│   │   ├── WebSocket & WebRTC Logic
-│   │   ├── Encryption/Decryption
-│   │   └── Event Handlers
-│   ├── /components (Presentational)
-│   │   ├── ConnectionManager.js
-│   │   ├── VerificationPrompt.js
-│   │   └── ChatInterface.js
-│   ├── cryptoUtils.js
-│   └── Cyberpunk Interface
-├── 🔧 Backend (Node.js + Express)
-│   ├── WebSocket Signaling Server
-│   ├── Session Management
-│   └── Peer Discovery
-└── 🔐 Security Layer
-    ├── ECDH Key Exchange
-    ├── AES-256-GCM Encryption
-    └── SAS Verification
+┌─────────────────────────────────────────────────────────────┐
+│                     NYX Messenger                           │
+├─────────────────────────────────────────────────────────────┤
+│ 🎨 Frontend (React 18.2.0)                                 │
+│   ├── App.js (Container Component)                         │
+│   │   ├── State Management (useState/useRef hooks)         │
+│   │   ├── WebSocket & WebRTC Logic                         │
+│   │   ├── Encryption/Decryption (Web Crypto API)           │
+│   │   └── Event Handlers & Business Logic                  │
+│   ├── /components (Presentational)                         │
+│   │   ├── ConnectionManager.js (Code Generation & UI)      │
+│   │   ├── VerificationPrompt.js (SAS Security)             │
+│   │   └── ChatInterface.js (Messaging & File Sharing)      │
+│   └── cryptoUtils.js (ECDH P-256 & AES-256-GCM)           │
+├─────────────────────────────────────────────────────────────┤
+│ 🔧 Backend (Node.js + Express)                             │
+│   ├── WebSocket Signaling Server                           │
+│   ├── Session Management & Health Checks                   │
+│   ├── Peer Discovery & Routing                             │
+│   └── Static File Serving (React Build)                    │
+├─────────────────────────────────────────────────────────────┤
+│ 🔐 Security Layer                                          │
+│   ├── ECDH P-256 Key Exchange                              │
+│   ├── AES-256-GCM Encryption                               │
+│   ├── SAS Verification                                     │
+│   └── Memory Protection (Secure Cleanup)                   │
+└─────────────────────────────────────────────────────────────┘
 ```
+
+### 🔧 Technology Stack
+
+**Frontend:**
+- **React 18.2.0** - Modern React with hooks and concurrent features
+- **Framer Motion 12.23.6** - Smooth animations and micro-interactions
+- **React Icons 5.5.0** - Comprehensive icon library
+- **Web Crypto API** - Browser-native cryptographic operations
+- **WebRTC** - Direct peer-to-peer communication
+
+**Backend:**
+- **Node.js + Express 4.19.2** - Lightweight server framework
+- **WebSocket (ws 8.17.0)** - Real-time bidirectional communication
+- **dotenv 16.4.5** - Environment variable management
+
+**Security:**
+- **ECDH P-256** - Elliptic curve key exchange
+- **AES-256-GCM** - Authenticated encryption
+- **SHA-256** - Cryptographic hashing for SAS verification
 
 ## 🚀 Quick Start
 
 ### Prerequisites
-- Node.js 16+ installed
-- Modern web browser with WebRTC support
+- **Node.js 16+** and npm installed
+- **Modern web browser** with WebRTC support (Chrome 88+, Firefox 84+, Safari 14+, Edge 88+)
+- **HTTPS/WSS** support for production deployment
 
 ### Installation
 
@@ -76,22 +130,134 @@ NYX Messenger
 
 2. **Install dependencies**
    ```bash
-   # Install all dependencies (frontend + backend)
+   # Install all dependencies (root, frontend, and backend)
    npm run build
+   
+   # OR install individually:
+   npm install
+   cd backend && npm install
+   cd ../frontend && npm install
    ```
 
 3. **Start the application**
    ```bash
-   # Start the backend server
+   # Production mode - Start the backend server (serves built React app)
    npm start
+   
+   # Development mode - Start both servers
+   # Terminal 1: Backend with auto-reload
+   cd backend && npm run dev
+   
+   # Terminal 2: Frontend with hot reload  
+   cd frontend && npm start
    ```
 
 4. **Access the application**
-   - Open your browser to `http://localhost:8080`
-   - The frontend will automatically connect to the backend
+   - **Production**: `http://localhost:8080` (backend serves React build)
+   - **Development**: `http://localhost:3000` (React dev server) + `http://localhost:8080` (backend)
+   - **Health check**: `http://localhost:8080/health`
+   - **WebSocket status**: `http://localhost:8080/ws-status`
+
+## 📋 Usage Guide
+
+### Starting a Secure Session
+
+1. **Generate Your Code**
+   - Click **"Generate Your One-Time Code"** to create a secure 8-character connection code
+   - Share this code with your peer (valid for 60 seconds with countdown timer)
+   - Wait for your peer to connect using the code
+
+2. **Connect to Peer**
+   - Click **"Enter Peer's Code"**
+   - Input the 8-character code shared by your peer
+   - Wait for the cryptographic handshake to complete
+
+3. **Verify Security**
+   - Both peers will see a Short Authentication String (SAS) - two verification words
+   - **Verbally confirm** the SAS matches on both devices (crucial for security!)
+   - Click **"Yes, We Match"** if identical, or **"No, It's Different"** to terminate
+
+4. **Start Messaging**
+   - Send encrypted messages that are never stored on servers
+   - Share files with customizable view duration (5 seconds to 5 minutes)
+   - See real-time typing indicators and connection status
+
+### Connection States
+- 🔴 **Disconnected** - Not connected to signaling server
+- 🟡 **Connected to Signaling Server** - Ready to generate codes
+- 🟢 **Secure Session Active** - Encrypted connection established
+- 🔵 **Secure WebRTC Channel Active** - Direct P2P connection
+
+### File Sharing
+1. **Select File** - Choose any file type (up to 100MB)
+2. **Set Duration** - Pick viewing time (5 seconds to 5 minutes)
+3. **Send** - File is encrypted and sent via WebRTC
+4. **Auto-Delete** - File disappears after the set duration
+
+## � Security
+
+### Cryptographic Implementation
+- **Key Exchange** - ECDH P-256 for secure key establishment
+- **Encryption** - AES-256-GCM for message and file encryption
+- **Authentication** - HMAC-based message authentication built into GCM mode
+- **Verification** - SHA-256 based SAS generation for connection verification
+- **Memory Security** - Zero-fill operations for sensitive data cleanup
+- **Random Generation** - Cryptographically secure random code generation
+
+### What NYX Messenger Protects Against
+- **Man-in-the-Middle Attacks** - ECDH key exchange with SAS verification
+- **Message Interception** - End-to-end AES-256-GCM encryption
+- **Data Persistence** - Ephemeral messaging with no server storage
+- **Connection Tampering** - Cryptographic integrity verification
+
+### Security Best Practices
+1. **Always verify the SAS** with your peer through a separate channel
+2. **Use on trusted networks** when possible
+3. **Keep browsers updated** for latest security patches
+4. **Be aware of browser security** - avoid browser extensions that might intercept data
+
+### Known Limitations
+- Requires JavaScript and modern browser features
+- Dependent on WebRTC support and network connectivity
+- SAS verification requires out-of-band communication
+- Server trust required for initial signaling
+- Vulnerable to compromised devices
+
+## 🔧 Development
+
+### Project Structure
+```
+nyx-messenger/
+├── package.json                 # Root package with build/start scripts
+├── README.md                    # This documentation
+├── .gitignore                   # Git ignore rules
+├── backend/
+│   ├── src/
+│   │   └── server.js           # Express + WebSocket signaling server
+│   ├── package.json            # Backend dependencies
+│   └── .env.example            # Environment variables template
+├── frontend/
+│   ├── src/
+│   │   ├── App.js              # Main React component (Container)
+│   │   ├── App.css             # Cyberpunk styling & animations
+│   │   ├── cryptoUtils.js      # Web Crypto API utilities
+│   │   ├── index.js            # React app entry point
+│   │   ├── index.css           # Global styles
+│   │   └── components/         # Presentational components
+│   │       ├── ConnectionManager.js
+│   │       ├── VerificationPrompt.js
+│   │       └── ChatInterface.js
+│   ├── public/
+│   │   ├── index.html          # HTML template
+│   │   ├── manifest.json       # PWA manifest
+│   │   ├── doki.mp3            # Notification sound
+│   │   └── [favicon files]     # App icons for PWA
+│   ├── build/                  # Production build output (generated)
+│   └── package.json            # Frontend dependencies
+└── .env                        # Environment variables (production)
+```
 
 ### Development Mode
-
 For development with hot reloading:
 
 ```bash
@@ -104,133 +270,24 @@ cd frontend
 npm start
 ```
 
-### Project Structure
+### Component Architecture
+NYX Messenger follows a **Container/Presentational component pattern**:
 
-```
-frontend/src/
-├── App.js                    # Container component with all logic
-├── App.css                   # Global styles and animations
-├── cryptoUtils.js           # Encryption/decryption utilities
-├── index.js                 # React app entry point
-└── components/              # Presentational components
-    ├── ConnectionManager.js  # Initial connection interface
-    ├── VerificationPrompt.js # SAS verification step
-    └── ChatInterface.js      # Main messaging interface
-```
-
-#### **For Developers**
-- **All state and logic** remains in `App.js` (container pattern)
-- **Components** are purely presentational and receive data via props
-- **No state management** within individual components
-- **Easy to extend**: Add new components or modify existing ones without touching core logic
-
-## 📖 How to Use
-
-### Starting a Session
-1. Click **"Generate Code"** to create a 6-digit connection code
-2. Share this code with your peer (valid for 60 seconds)
-3. Wait for your peer to connect using the code
-
-### Joining a Session
-1. Click **"Enter Code"** 
-2. Input the 6-digit code shared by your peer
-3. Wait for the connection to establish
-
-### Secure Communication
-1. **Verify Connection**: Both peers will see a Short Authentication String (SAS)
-2. **Compare SAS**: Verbally confirm the SAS matches on both devices
-3. **Start Messaging**: Once verified, send messages and files securely
-
-### Message Features
-- Type and send messages that disappear after being read
-- Share files with ephemeral viewing
-- See typing indicators in real-time
-- Monitor connection status
-
-## 🔧 Technical Details
-
-### Frontend Stack
-- **React 18.2.0**: Modern React with hooks and concurrent features
-- **Framer Motion**: Smooth animations and transitions
-- **Web Crypto API**: Browser-native cryptographic operations
-- **WebRTC**: Direct peer-to-peer communication
-- **React Icons**: Comprehensive icon library
-
-### Frontend Architecture
-NYX Messenger follows a **Container/Presentational component pattern** for optimal maintainability:
-
-#### **Container Component**
-- **`App.js`**: Central hub containing all application logic
+- **`App.js`** - Central hub containing all application logic
   - State management (useState, useRef hooks)
   - WebSocket and WebRTC connection handling
   - Encryption/decryption operations
   - Event handlers and business logic
-  - Acts as single source of truth for app state
 
-#### **Presentational Components**
-- **`ConnectionManager.js`**: Initial connection UI
-  - Code generation and display
-  - Peer code input interface
-  - Copy-to-clipboard functionality
-  - Renders when `!sharedSecret`
+- **Presentational Components** - Pure UI components that receive data via props
+  - `ConnectionManager.js` - Initial connection UI
+  - `VerificationPrompt.js` - Security verification step
+  - `ChatInterface.js` - Main messaging interface
 
-- **`VerificationPrompt.js`**: Security verification step
-  - Short Authentication String (SAS) display
-  - Verification buttons (Yes/No)
-  - Renders when `sharedSecret && !isVerified`
-
-- **`ChatInterface.js`**: Main messaging interface
-  - Message list with animations
-  - Typing indicators
-  - Message input and file sharing
-  - Ephemeral file display
-  - Renders when `sharedSecret && isVerified`
-
-#### **Benefits of This Architecture**
-- **Separation of Concerns**: Logic separated from presentation
-- **Maintainability**: Easier to modify and debug components
-- **Reusability**: Components can be easily replaced or extended
-- **Testability**: Isolated components easier to unit test
-- **State Management**: Centralized state prevents prop drilling issues
-
-### Backend Stack
-- **Node.js + Express**: Lightweight server framework
-- **WebSocket (ws)**: Real-time bidirectional communication
-- **dotenv**: Environment variable management
-
-### Cryptographic Implementation
-- **Key Exchange**: ECDH P-256 for secure key establishment
-- **Encryption**: AES-256-GCM for message encryption
-- **Authentication**: HMAC-based message authentication
-- **Verification**: SHA-256 based SAS generation
-
-### WebRTC Features
-- **Data Channels**: Reliable ordered message delivery for P2P communication
-- **ICE Candidates**: Advanced NAT traversal with multiple STUN/TURN servers
-- **Connection Management**: Automatic reconnection, retry logic, and graceful fallbacks
-- **Enhanced Connectivity**: Multiple TURN servers for improved success rate in restrictive networks
-- **Connection Monitoring**: Real-time connection state tracking with detailed diagnostics
-- **Fallback System**: Automatic server relay when P2P connection fails
-- **Timeout Handling**: Smart timeouts with retry mechanisms for connection establishment
-
-## 🔐 Security Considerations
-
-### What NYX Messenger Protects Against
-- **Man-in-the-Middle Attacks**: ECDH key exchange with SAS verification
-- **Message Interception**: End-to-end AES-256-GCM encryption
-- **Data Persistence**: Ephemeral messaging with no server storage
-- **Connection Tampering**: Cryptographic integrity verification
-
-### Security Best Practices
-1. **Always verify the SAS** with your peer through a separate channel
-2. **Use on trusted networks** when possible
-3. **Keep browsers updated** for latest security patches
-4. **Be aware of browser security** - avoid browser extensions that might intercept data
-
-### Limitations
-- Requires JavaScript and modern browser features
-- Dependent on WebRTC support and network connectivity
-- SAS verification requires out-of-band communication
+- **`cryptoUtils.js`** - Secure cryptographic operations
+  - ECDH P-256 key generation and exchange
+  - AES-256-GCM encryption/decryption
+  - SAS generation and memory cleanup
 
 ## 🌍 Deployment
 
@@ -249,344 +306,29 @@ The application is deployed on Render.com with:
 
 ### Self-Hosting
 1. Build the frontend: `npm run build --prefix frontend`
-2. Configure environment variables
+2. Configure environment variables in `backend/.env`
 3. Start the server: `npm start`
 4. Ensure WebSocket connections are supported by your hosting provider
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/amazing-feature`
-3. Commit your changes: `git commit -m 'Add amazing feature'`
-4. Push to the branch: `git push origin feature/amazing-feature`
-5. Open a Pull Request
-
-## 📝 License
-
-This project is licensed under the ISC License.
-
-## ⚠️ Disclaimer
-
-NYX Messenger is designed for secure communication but should not be used for sensitive information without proper security review. The application is provided as-is without warranty.
-
-## 🔮 Future Enhancements
-
-### 🎯 Planned Features
-- [ ] Group messaging support
-- [ ] Voice/video calling integration
-- [ ] Mobile app development
-- [ ] Advanced file encryption
-- [ ] Custom themes and personalization
-- [ ] Message threading and organization
-
-### ✅ Recent Improvements
-- [x] **Enhanced WebRTC Connectivity** (Latest): Improved P2P connection reliability with multiple TURN servers and retry logic
-- [x] **Production Network Support**: Better handling of restrictive networks and NAT traversal
-- [x] **Connection Diagnostics**: Enhanced debugging and monitoring for WebRTC connections
-- [x] **Graceful Fallbacks**: Automatic server relay when P2P connections fail
-- [x] **Component Architecture Refactor**: Restructured codebase into maintainable, reusable components
-- [x] **Container/Presentational Pattern**: Separated business logic from UI presentation
-- [x] **Code Validity Timer**: Added 60-second countdown for connection codes
-- [x] **Enhanced Error Handling**: Improved connection state management and user feedback
-
----
-
-**Built with ❤️ using React, WebRTC, and modern cryptography**
-
-![NYX Messenger](https://img.shields.io/badge/Status-Active-brightgreen)
-![Security](https://img.shields.io/badge/Security-E2E%20Encrypted-blue)
-![WebRTC](https://img.shields.io/badge/P2P-WebRTC-orange)
-![React](https://img.shields.io/badge/Frontend-React-61dafb)
-![Node.js](https://img.shields.io/badge/Backend-Node.js-green)
-
-## 🚀 Overview
-
-NYX Messenger is a privacy-focused, real-time communication platform that prioritizes security and ephemeral messaging. Built with modern web technologies, it provides secure peer-to-peer communication through WebRTC with fallback server relay, ensuring your conversations remain private and temporary.
-
-### ✨ Key Features
-
-- **🔐 End-to-End Encryption**: ECDH key exchange with AES-256-GCM encryption
-- **⏱️ Ephemeral Codes**: Time-limited connection codes (60-second validity)
-- **🔗 Direct P2P Connection**: WebRTC-based peer-to-peer communication
-- **📁 Temporary File Sharing**: Send files that auto-delete after viewing
-- **🛡️ Security Verification**: Short Authentication String (SAS) verification
-- **💬 Real-time Messaging**: Instant messaging with typing indicators
-- **🌊 Responsive Design**: Beautiful cyberpunk-themed UI with animations
-- **🔔 Notifications**: Audio alerts and unread message counts
-- **📱 Cross-Platform**: Works on desktop and mobile browsers
-
-## 🏗️ Architecture
-
-```
-┌─────────────────┐    WebSocket     ┌─────────────────┐
-│   Frontend      │◄─────────────────►│    Backend      │
-│   (React)       │                   │   (Node.js)     │
-└─────────────────┘                   └─────────────────┘
-         │                                     │
-         │         WebRTC P2P Connection       │
-         └─────────────────────────────────────┘
-                    (Direct Connection)
-```
-
-### 🔧 Tech Stack
-
-**Frontend:**
-- React 18.2.0
-- Framer Motion (animations)
-- React Icons
-- Web Crypto API
-- WebRTC API
-
-**Backend:**
-- Node.js
-- Express.js
-- WebSocket (ws)
-- dotenv
-
-**Security:**
-- ECDH P-256 key exchange
-- AES-256-GCM encryption
-- Cryptographically secure random codes
-
-## 🚀 Quick Start
-
-### Prerequisites
-
-- Node.js 16+ and npm
-- Modern web browser with WebRTC support
-- HTTPS/WSS for production deployment
-
-### Installation
-
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/JaskaranSingh0/nyx-messenger.git
-   cd nyx-messenger
-   ```
-
-2. **Install dependencies:**
-   ```bash
-   # Install root dependencies
-   npm install
-   
-   # Install backend dependencies
-   cd backend && npm install
-   
-   # Install frontend dependencies
-   cd ../frontend && npm install
-   ```
-
-3. **Development Setup:**
-   ```bash
-   # Terminal 1: Start backend server
-   cd backend
-   npm run dev
-   
-   # Terminal 2: Start frontend development server
-   cd frontend
-   npm start
-   ```
-
-4. **Production Build:**
-   ```bash
-   # Build frontend for production
-   npm run build
-   
-   # Start production server
-   npm start
-   ```
-
-### 🌐 Deployment
-
-The application serves the React build files from the backend server:
-
-```bash
-# Production deployment
-npm run build  # Builds frontend and installs all dependencies
-npm start      # Starts the production server on PORT (default: 8080)
-```
-
-## 🔐 Security Features
-
-### Encryption Protocol
-
-1. **Key Exchange**: ECDH P-256 curve for secure key agreement
-2. **Symmetric Encryption**: AES-256-GCM for message encryption
-3. **Authentication**: HMAC verification built into GCM mode
-4. **Forward Secrecy**: New session keys for each connection
-
-### Security Verification
-
-NYX Messenger implements Short Authentication String (SAS) verification:
-- Both users see the same two words
-- Verbal confirmation prevents man-in-the-middle attacks
-- Connection terminates if words don't match
-
-### Privacy Features
-
-- **Ephemeral Codes**: Connection codes expire after 60 seconds
-- **No Message Storage**: Messages are never stored on servers
-- **Memory Cleanup**: Sensitive data is zeroed after use
-- **Direct P2P**: Messages bypass servers when WebRTC is active
-
-## 📋 Usage Guide
-
-### Starting a Secure Session
-
-1. **Generate Your Code:**
-   - Click "Generate Your One-Time Code"
-   - Share the 8-character code with your peer
-   - Code is valid for 60 seconds (countdown timer shows remaining time)
-
-2. **Connect to Peer:**
-   - Enter your peer's code in the input field
-   - Click "Connect to Peer"
-   - Wait for cryptographic handshake
-
-3. **Verify Security:**
-   - Both users will see the same two verification words
-   - Verbally confirm the words match
-   - Click "Yes, We Match" if they're identical
-   - Click "No, It's Different" to terminate if they don't match
-
-4. **Start Messaging:**
-   - Send encrypted messages in real-time
-   - See typing indicators when your peer is typing
-   - Share temporary files that auto-delete
-
-### File Sharing
-
-1. **Select File**: Choose any file type
-2. **Set Duration**: Pick viewing time (5 seconds to 5 minutes)
-3. **Send**: File is encrypted and sent via WebRTC
-4. **Auto-Delete**: File disappears after the set duration
-
-### Connection States
-
-- **🔴 Disconnected**: Not connected to signaling server
-- **🟡 Connected to Signaling Server**: Ready to generate codes
-- **🟢 Secure Session Active**: Encrypted connection established
-- **🔵 Secure WebRTC Channel Active**: Direct P2P connection
-
-## 🔧 Configuration
-
-### Environment Variables
-
-Create `.env` files in the backend directory:
-
-```env
-PORT=8080
-NODE_ENV=production
-```
-
-### Network Configuration
-
-For production deployment, ensure:
-- HTTPS/WSS support for secure contexts
-- STUN/TURN servers for NAT traversal
-- Proper firewall configuration for WebRTC
-
-## 🏗️ Project Structure
-
-```
-nyx-messenger/
-├── README.md
-├── package.json                 # Root package configuration
-├── backend/
-│   ├── src/
-│   │   └── server.js           # WebSocket signaling server
-│   ├── package.json            # Backend dependencies
-│   └── .gitignore
-├── frontend/
-│   ├── src/
-│   │   ├── App.js              # Main React component
-│   │   ├── App.css             # Cyberpunk styling
-│   │   ├── cryptoUtils.js      # Encryption utilities
-│   │   ├── index.js            # React entry point
-│   │   └── index.css           # Global styles
-│   ├── public/
-│   │   ├── index.html          # HTML template
-│   │   ├── manifest.json       # PWA manifest
-│   │   ├── doki.mp3            # Notification sound
-│   │   └── [favicon files]     # App icons
-│   ├── build/                  # Production build output
-│   └── package.json            # Frontend dependencies
-└── .gitignore                  # Git ignore rules
-```
-
-## 🔌 API Reference
-
-### WebSocket Messages
-
-#### Client → Server
-
-```javascript
-// Register connection code
-{
-  type: 'register_code',
-  code: 'ABC12345'
-}
-
-// Send session offer
-{
-  type: 'session_offer',
-  toCode: 'DEF67890',
-  fromCode: 'ABC12345',
-  publicKeyJwk: {...}
-}
-
-// WebRTC signaling
-{
-  type: 'webrtc_offer',
-  sdp: {...},
-  toCode: 'DEF67890',
-  fromCode: 'ABC12345'
-}
-```
-
-#### Server → Client
-
-```javascript
-// Registration confirmation
-{
-  type: 'registration_success',
-  code: 'ABC12345'
-}
-
-// Session response
-{
-  type: 'session_answer',
-  fromCode: 'DEF67890',
-  publicKeyJwk: {...}
-}
-
-// Error handling
-{
-  type: 'error',
-  message: 'Peer not found'
-}
-```
-
-### Crypto API
-
-```javascript
-// Key generation
-const keyPair = await generateSessionKeyPair();
-
-// Derive shared secret
-const secret = await deriveSharedSecret(privateKey, peerPublicKey);
-
-// Encrypt message
-const {ciphertext, iv} = await encryptMessage(secret, "Hello World");
-
-// Decrypt message
-const decrypted = await decryptMessage(secret, ciphertext, iv);
-```
+5. Configure HTTPS/WSS for production deployment
+
+### Browser Compatibility
+
+**Minimum Requirements:**
+- ✅ Chrome 88+ (January 2021)
+- ✅ Firefox 84+ (December 2020)
+- ✅ Safari 14+ (September 2020)
+- ✅ Edge 88+ (January 2021)
+
+**Required Browser Features:**
+- WebRTC Data Channels
+- Web Crypto API (ECDH P-256, AES-GCM)
+- WebSocket support
+- ES6+ JavaScript features
+- Service Worker support (for PWA)
 
 ## 🧪 Testing
 
 ### Manual Testing Checklist
-
 - [ ] Code generation and expiry
 - [ ] Peer connection establishment
 - [ ] Message encryption/decryption
@@ -596,47 +338,68 @@ const decrypted = await decryptMessage(secret, ciphertext, iv);
 - [ ] Connection termination
 - [ ] Error handling
 
-### Browser Compatibility
+## � Project Status
 
-- ✅ Chrome 88+
-- ✅ Firefox 84+
-- ✅ Safari 14+
-- ✅ Edge 88+
+**Current Version:** 1.0.0
+- **Production Ready** - Deployed on Render.com
+- **Last Updated** - July 2025
+- **Development Status** - Active maintenance and feature development
+- **Code Quality** - Well-documented, modular architecture
 
-## 🚨 Security Considerations
-
-### Known Limitations
-
-1. **Server Trust**: Initial signaling requires trusting the WebSocket server
-2. **Browser Security**: Relies on browser's Web Crypto API implementation
-3. **Network Monitoring**: Traffic analysis may reveal communication patterns
-4. **Device Security**: Vulnerable to compromised devices
-
-### Best Practices
-
-1. **Verify Deployment**: Ensure HTTPS/WSS in production
-2. **Code Sharing**: Use secure channels to share connection codes
-3. **Regular Updates**: Keep dependencies updated for security patches
-4. **Network Security**: Use VPN for additional privacy
+### 🔧 Development Metrics
+- **Backend** - 177 lines (server.js) - Lightweight and efficient
+- **Frontend Core** - 1,677+ lines (App.js) - Comprehensive feature set
+- **Components** - 3 modular UI components for maintainability
+- **Crypto Utils** - 204 lines of secure cryptographic operations
+- **Dependencies** - 11 production + 3 development dependencies
 
 ## 🤝 Contributing
 
 1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
+2. Create a feature branch: `git checkout -b feature/amazing-feature`
+3. Commit your changes: `git commit -m 'Add amazing feature'`
+4. Push to the branch: `git push origin feature/amazing-feature`
 5. Open a Pull Request
 
 ### Development Guidelines
-
 - Follow ESLint configuration
 - Maintain code comments for crypto operations
 - Test security features thoroughly
 - Update documentation for new features
 
+## 🔮 Future Enhancements
+
+### 🎯 Planned Features
+- [ ] Group messaging support with multi-party key exchange
+- [ ] Voice/video calling integration via WebRTC
+- [ ] Mobile app development (React Native)
+- [ ] Advanced file encryption with metadata protection
+- [ ] Custom themes and personalization options
+- [ ] Message threading and organization
+- [ ] Persistent session recovery
+- [ ] End-to-end encrypted file storage
+
+### ✅ Recent Improvements (2025)
+- [x] Enhanced WebRTC connectivity with multiple TURN servers
+- [x] Production network support for restrictive environments
+- [x] Connection diagnostics and monitoring
+- [x] Graceful fallbacks for failed P2P connections
+- [x] Component architecture refactor for maintainability
+- [x] Container/Presentational pattern implementation
+- [x] Code validity timer with visual feedback
+- [x] Enhanced error handling and user feedback
+- [x] Memory security with zero-fill operations
+- [x] Production monitoring and health checks
+- [x] File transfer optimization with chunked uploads
+- [x] Notification system with audio alerts
+
 ## 📜 License
 
-This project is licensed under the ISC License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the ISC License.
+
+## ⚠️ Disclaimer
+
+NYX Messenger is designed for secure communication but should not be used for sensitive information without proper security review. The application is provided as-is without warranty.
 
 ## 🙏 Acknowledgments
 
@@ -648,10 +411,14 @@ This project is licensed under the ISC License - see the [LICENSE](LICENSE) file
 ## 📞 Support
 
 For questions, issues, or contributions:
-- Create an issue on GitHub
-- Contact: [Your Contact Information]
+- 🐛 **Bug Reports** - Create an issue on GitHub with detailed reproduction steps
+- 💡 **Feature Requests** - Submit enhancement proposals via GitHub Issues
+- 📚 **Documentation** - Comprehensive README.md and inline code comments
+- 🔒 **Security** - Report security vulnerabilities responsibly via GitHub Issues
 
 ---
+
+**Built with ❤️ using React, WebRTC, and modern cryptography**
 
 ⚠️ **Security Notice**: NYX Messenger is designed for privacy-conscious users but should not be considered bulletproof. Always verify the security of your deployment and use additional security measures for highly sensitive communications.
 

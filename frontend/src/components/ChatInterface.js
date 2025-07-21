@@ -93,6 +93,10 @@ const ChatInterface = ({
                     onKeyDown={handleTyping}
                     onKeyPress={e => { if (e.key === 'Enter') sendTextMessage(); }}
                     placeholder="Type your ephemeral message..."
+                    inputMode="text"
+                    autoComplete="off"
+                    autoCorrect="on"
+                    autoCapitalize="sentences"
                 />
                 <motion.button
                     onClick={sendTextMessage}
