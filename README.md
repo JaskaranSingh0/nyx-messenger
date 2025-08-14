@@ -2,13 +2,9 @@
 
 > A secure, end-to-end encrypted messenger featuring peer-to-peer communication, ephemeral messaging, and a cyberpunk-inspired interface.
 
-**🔗 Live Demo:** [https://ny## 🔐 Security
+**🔗 Live Demo:** 
 
-### Cryptographic Implementationessenger.onrender.com/](https://nyx-messenger.onrender.com/)
 
-[![License: ISC](https://img.shi## 📊 Project Status
-
-**Current Version:** 1.0.0s.io/badge/License-ISC-blue.svg)](https://opensource.org/licenses/ISC)
 [![React](https://img.shields.io/badge/React-18.2.0-61dafb.svg)](https://reactjs.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-16+-339933.svg)](https://nodejs.org/)
 [![WebRTC](https://img.shields.io/badge/WebRTC-P2P-orange.svg)](https://webrtc.org/)
